@@ -364,7 +364,7 @@ public class StarFieldViewerForm : Form
         // Seed input row (HUD, above the canvas): 13-char code 鈫?regenerate the whole base field
         Font capFont = new Font("Microsoft YaHei", 10, FontStyle.Bold);
         var seedCaption = new Label { Left = 8, Top = 4, Width = 104, Height = 26, Text = "种子(13位)",
-            ForeColor = Color.Gold, Font = capFont };
+            ForeColor = Color.Black, Font = capFont };
         seedBox = new TextBox { Left = 118, Top = 0, Width = 210, Font = new Font("Consolas", 12) };
         seedBox.Text = SeedCodec.ExampleSeed;
         genBtn = new Button { Left = 336, Top = 0, Width = 96, Height = 30, Text = "生成底图" };
@@ -373,11 +373,11 @@ public class StarFieldViewerForm : Form
         {
             if (e2.KeyCode == Keys.Enter) { RegenerateField(seedBox.Text); e2.SuppressKeyPress = true; }
         };
-        seedLabel = new Label { Left = 448, Top = 4, Width = 380, Height = 26, ForeColor = Color.LightGray,
+        seedLabel = new Label { Left = 448, Top = 4, Width = 380, Height = 26, ForeColor = Color.Black,
             Font = new Font("Consolas", 10) };
         // Base breathe factor (0 = constant bright, 1 = full twinkle)
-        var breatheCaption = new Label { Left = 840, Top = 4, Width = 70, Height = 26, Text = "鍛煎惛绯绘暟",
-            ForeColor = Color.Gold, Font = capFont };
+        var breatheCaption = new Label { Left = 840, Top = 4, Width = 70, Height = 26, Text = "呼吸系数",
+            ForeColor = Color.Black, Font = capFont };
         breatheBox = new NumericUpDown { Left = 914, Top = 0, Width = 76, DecimalPlaces = 2,
             Minimum = 0m, Maximum = 1m, Increment = 0.05m, Value = 1m, Font = new Font("Consolas", 10) };
         breatheBox.ValueChanged += delegate(object s2, EventArgs e2)
@@ -389,12 +389,12 @@ public class StarFieldViewerForm : Form
         breatheBox.Leave += delegate { ImmediateParamUpdate(false); };
         breatheBox.KeyDown += delegate(object s2, KeyEventArgs e2)
         { if (e2.KeyCode == Keys.Enter) { ImmediateParamUpdate(false); e2.SuppressKeyPress = true; } };
-        breatheLabel = new Label { Left = 996, Top = 4, Width = 120, Height = 26, ForeColor = Color.LightGreen,
+        breatheLabel = new Label { Left = 996, Top = 4, Width = 120, Height = 26, ForeColor = Color.Black,
             Font = new Font("Consolas", 10) };
         UpdateBreatheLabel();
         // Offset coefficient (0 = star at cell center, 1 = full 2D hash offset, maxOffset 0.45)
-        var offsetCaption = new Label { Left = 1120, Top = 4, Width = 70, Height = 26, Text = "鍋忕Щ绯绘暟",
-            ForeColor = Color.Gold, Font = capFont };
+        var offsetCaption = new Label { Left = 1120, Top = 4, Width = 70, Height = 26, Text = "偏移系数",
+            ForeColor = Color.Black, Font = capFont };
         offsetBox = new NumericUpDown { Left = 1194, Top = 0, Width = 76, DecimalPlaces = 2,
             Minimum = 0m, Maximum = 1m, Increment = 0.05m, Value = 1m, Font = new Font("Consolas", 10) };
         offsetBox.ValueChanged += delegate(object s2, EventArgs e2)
@@ -406,12 +406,12 @@ public class StarFieldViewerForm : Form
         offsetBox.Leave += delegate { ImmediateParamUpdate(true); };
         offsetBox.KeyDown += delegate(object s2, KeyEventArgs e2)
         { if (e2.KeyCode == Keys.Enter) { ImmediateParamUpdate(true); e2.SuppressKeyPress = true; } };
-        offsetLabel = new Label { Left = 1276, Top = 4, Width = 120, Height = 26, ForeColor = Color.LightGreen,
+        offsetLabel = new Label { Left = 1276, Top = 4, Width = 120, Height = 26, ForeColor = Color.Black,
             Font = new Font("Consolas", 10) };
         UpdateOffsetLabel();
         // Hash threshold (star qualification): higher = fewer stars, lower = denser field
         var thresholdCaption = new Label { Left = 1400, Top = 4, Width = 70, Height = 26, Text = "哈希阈值",
-            ForeColor = Color.Gold, Font = capFont };
+            ForeColor = Color.Black, Font = capFont };
         thresholdBox = new NumericUpDown { Left = 1474, Top = 0, Width = 76, DecimalPlaces = 3,
             Minimum = 0.01m, Maximum = 1m, Increment = 0.01m, Value = 0.6m, Font = new Font("Consolas", 10) };
         thresholdBox.ValueChanged += delegate(object s2, EventArgs e2)
@@ -428,12 +428,12 @@ public class StarFieldViewerForm : Form
         thresholdBox.Leave += delegate { ImmediateParamUpdate(true); };
         thresholdBox.KeyDown += delegate(object s2, KeyEventArgs e2)
         { if (e2.KeyCode == Keys.Enter) { ImmediateParamUpdate(true); e2.SuppressKeyPress = true; } };
-        thresholdLabel = new Label { Left = 1556, Top = 4, Width = 150, Height = 26, ForeColor = Color.LightGreen,
+        thresholdLabel = new Label { Left = 1556, Top = 4, Width = 150, Height = 26, ForeColor = Color.Black,
             Font = new Font("Consolas", 10) };
         UpdateThresholdLabel();
         // Neighbor suppression (0 = no 3脳3 linked dimming, 1 = peak cell strongly dims its 8 neighbors)
-        var suppressCaption = new Label { Left = 1720, Top = 4, Width = 70, Height = 26, Text = "鎶戝埗绯绘暟",
-            ForeColor = Color.Gold, Font = capFont };
+        var suppressCaption = new Label { Left = 1720, Top = 4, Width = 70, Height = 26, Text = "抑制系数",
+            ForeColor = Color.Black, Font = capFont };
         suppressBox = new NumericUpDown { Left = 1794, Top = 0, Width = 76, DecimalPlaces = 2,
             Minimum = 0m, Maximum = 1m, Increment = 0.05m, Value = 0.5m, Font = new Font("Consolas", 10) };
         suppressBox.ValueChanged += delegate(object s2, EventArgs e2)
@@ -445,12 +445,12 @@ public class StarFieldViewerForm : Form
         suppressBox.Leave += delegate { ImmediateParamUpdate(false); };
         suppressBox.KeyDown += delegate(object s2, KeyEventArgs e2)
         { if (e2.KeyCode == Keys.Enter) { ImmediateParamUpdate(false); e2.SuppressKeyPress = true; } };
-        suppressLabel = new Label { Left = 1876, Top = 4, Width = 150, Height = 26, ForeColor = Color.LightGreen,
+        suppressLabel = new Label { Left = 1876, Top = 4, Width = 150, Height = 26, ForeColor = Color.Black,
             Font = new Font("Consolas", 10) };
         UpdateSuppressLabel();
         // Frame-rate target (5..60 fps, default 30): Timer.Interval = 1000/f
-        var fpsCaption = new Label { Left = 2030, Top = 4, Width = 70, Height = 26, Text = "甯х巼",
-            ForeColor = Color.Gold, Font = capFont };
+        var fpsCaption = new Label { Left = 2030, Top = 4, Width = 70, Height = 26, Text = "帧率",
+            ForeColor = Color.Black, Font = capFont };
         fpsBox = new NumericUpDown { Left = 2104, Top = 0, Width = 60, DecimalPlaces = 0,
             Minimum = 5m, Maximum = 60m, Increment = 1m, Value = 30m, Font = new Font("Consolas", 10) };
         fpsBox.ValueChanged += delegate(object s2, EventArgs e2)
@@ -462,7 +462,7 @@ public class StarFieldViewerForm : Form
             timer.Interval = n <= 1 ? 8 : (int)(n * 15.6);   // n=1 must stay <15.6ms (1 tick)
             UpdateFpsLabel();
         };
-        fpsLabel = new Label { Left = 2170, Top = 4, Width = 120, Height = 26, ForeColor = Color.LightGreen,
+        fpsLabel = new Label { Left = 2170, Top = 4, Width = 120, Height = 26, ForeColor = Color.Black,
             Font = new Font("Consolas", 10) };
         UpdateFpsLabel();
         Controls.Add(seedCaption); Controls.Add(seedBox); Controls.Add(genBtn); Controls.Add(seedLabel);
@@ -526,7 +526,7 @@ public class StarFieldViewerForm : Form
 
     void UpdateSeedLabel()
     {
-        seedLabel.ForeColor = Color.LightGray;
+        seedLabel.ForeColor = Color.Black;
         seedLabel.Text = "seed hash = 0x" + ((uint)p.seed).ToString("X8") + "   底图已按该种子确定性生成";
     }
 
@@ -553,7 +553,7 @@ public class StarFieldViewerForm : Form
     void UpdateFpsLabel()
     {
         int f = (int)fpsBox.Value;
-        fpsLabel.Text = "fps鐩爣=" + f;
+        fpsLabel.Text = "fps目标=" + f;
     }
 
     // ------------------------------------------------------------------
