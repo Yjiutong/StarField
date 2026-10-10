@@ -20,12 +20,10 @@ public class StarFieldViewerForm : Form
     StarFieldAlgo.StarField.Params p;
     StarView.View view = new StarView.View { curX = 20, curY = 24 };
     Timer timer;
-    Bitmap fullThumb;
     float t0;
     float scrollX, scrollY;
     const float autoSpeed = 5f;    // px/s
     int lastTick;
-    int fullGridW, fullGridH;
 
     // Smooth-render caches
     byte[] starCache;
@@ -35,30 +33,40 @@ public class StarFieldViewerForm : Form
     float[] twCache;
     int twOx, twOy, twW, twH;
 
+    // Seed input controls
+    TextBox seedBox;
+    Button genBtn;
+    Label seedLabel;
+    string currentCode = SeedCodec.ExampleSeed;
+
     public StarFieldViewerForm()
     {
         Text = "Star Field Viewer (1080P auto-cruise, twinkling stars)";
-        ClientSize = new Size(1920, 1080);
+        // Fit the screen (canvas 1600x960 + input row); smaller displays get a smaller window
+        var wa = Screen.PrimaryScreen.WorkingArea;
+        ClientSize = new Size(Math.Min(1920, wa.Width - 20), Math.Min(1080, wa.Height - 20));
         StartPosition = FormStartPosition.CenterScreen;
         DoubleBuffered = true;
         KeyPreview = true;
-        p = StarFieldAlgo.StarField.Default(0x4D54);
-        fullGridW = FieldW / Cell; fullGridH = FieldH / Cell;
+        p = StarFieldAlgo.StarField.Default((int)SeedCodec.Hash(SeedCodec.ExampleSeed));
+        p.qualifyThreshold = 0.6f;   // demo density: keeps enough stars inside the 20x12 viewport
         t0 = (float)(Environment.TickCount / 1000.0);
 
-        var full = BuildStarRegion(0, 0, FieldW, FieldH);
-        fullThumb = new Bitmap(FieldW, FieldH, PixelFormat.Format24bppRgb);
-        var bd = fullThumb.LockBits(new Rectangle(0, 0, FieldW, FieldH), ImageLockMode.WriteOnly, PixelFormat.Format24bppRgb);
-        var dst = new byte[bd.Stride * FieldH];
-        for (int y = 0; y < FieldH; y++)
-            for (int x = 0; x < FieldW; x++)
-            {
-                byte v = full[y * FieldW + x];
-                int i = y * bd.Stride + x * 3;
-                dst[i] = v; dst[i + 1] = v; dst[i + 2] = v;
-            }
-        Marshal.Copy(dst, 0, bd.Scan0, dst.Length);
-        fullThumb.UnlockBits(bd);
+        // Seed input row: 13-char code → regenerate the whole base field
+        var seedCaption = new Label { Left = 8, Top = 996, Width = 104, Height = 26, Text = "种子(13位)",
+            ForeColor = Color.White, Font = new Font("Microsoft YaHei", 10) };
+        seedBox = new TextBox { Left = 118, Top = 992, Width = 210, Font = new Font("Consolas", 12) };
+        seedBox.Text = SeedCodec.ExampleSeed;
+        genBtn = new Button { Left = 336, Top = 990, Width = 96, Height = 30, Text = "生成底图" };
+        genBtn.Click += delegate(object s2, EventArgs e2) { RegenerateField(seedBox.Text); };
+        seedBox.KeyDown += delegate(object s2, KeyEventArgs e2)
+        {
+            if (e2.KeyCode == Keys.Enter) { RegenerateField(seedBox.Text); e2.SuppressKeyPress = true; }
+        };
+        seedLabel = new Label { Left = 448, Top = 996, Width = 900, Height = 26, ForeColor = Color.LightGray,
+            Font = new Font("Consolas", 10) };
+        Controls.Add(seedCaption); Controls.Add(seedBox); Controls.Add(genBtn); Controls.Add(seedLabel);
+        UpdateSeedLabel();
 
         RebuildCache();
         UpdateTwinkle(Environment.TickCount);   // pre-init twinkle cache (avoids null on first paint)
@@ -82,6 +90,34 @@ public class StarFieldViewerForm : Form
             Invalidate();
         };
         timer.Start();
+    }
+
+    // Regenerate the whole base field from a 13-char seed code (deterministic hash → same field).
+    void RegenerateField(string code)
+    {
+        if (!SeedCodec.IsValid(code))
+        {
+            seedLabel.ForeColor = Color.OrangeRed;
+            seedLabel.Text = "种子需为 13 位，每位为字母或数字（0-9A-Za-z）";
+            return;
+        }
+        uint h = SeedCodec.Hash(code);
+        p.seed = (int)h;
+        p.qualifyThreshold = 0.6f;   // demo density (same as initial view)
+        currentCode = code;
+        view = new StarView.View { curX = 20, curY = 24 };
+        scrollX = 0f; scrollY = 0f;
+
+        RebuildCache();
+        UpdateTwinkle(Environment.TickCount);
+        UpdateSeedLabel();
+        Invalidate();
+    }
+
+    void UpdateSeedLabel()
+    {
+        seedLabel.ForeColor = Color.LightGray;
+        seedLabel.Text = "seed hash = 0x" + ((uint)p.seed).ToString("X8") + "   底图已按该种子确定性生成";
     }
 
     byte[] BuildStarRegion(int ox, int oy, int w, int h)
@@ -181,20 +217,8 @@ public class StarFieldViewerForm : Form
             g.DrawString(string.Format("anchor ({0},{1})   smooth cruise 5px/s (sub-pixel)   t={2:F1}s",
                 view.curX, view.curY, time), f, Brushes.White, 8, 0);
             g.DrawString("auto cruising (Esc=close)", f, Brushes.Orange, 760, 0);
-        }
-
-        // Sidebar thumbnail + viewport box
-        int sx = ox + viewW + 12, sy = oy + 8;
-        int sw = 292, sh = (int)(sw * (FieldH / (float)FieldW));
-        g.DrawImage(fullThumb, sx, sy, sw, sh);
-        float kx = sw / (float)fullGridW, ky = sh / (float)fullGridH;
-        int bx = (int)(sx + view.curX * kx), by = (int)(sy + view.curY * ky);
-        g.DrawRectangle(Pens.Lime, bx, by, (int)(ViewCols * kx), (int)(ViewRows * ky));
-        using (var fs = new Font("Consolas", 9))
-        {
-            g.DrawString("full field thumbnail (green = viewport)", fs, Brushes.LightGreen, sx, sy + sh + 6);
-            g.DrawString(string.Format("viewport x[{0},{1}] y[{2},{3}]",
-                view.curX, view.curX + ViewCols - 1, view.curY, view.curY + ViewRows - 1), fs, Brushes.Gray, sx, sy + sh + 22);
+            g.DrawString(string.Format("seed={0}  hash=0x{1:X8}  (输入13位编码点[生成底图])",
+                currentCode, (uint)p.seed), f, Brushes.LightGreen, 8, 30);
         }
     }
 }
@@ -206,6 +230,14 @@ static class Program
     {
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
+        Application.ThreadException += delegate(object s, System.Threading.ThreadExceptionEventArgs e)
+        {
+            try { System.IO.File.WriteAllText("viewer_error.log", e.Exception.ToString()); } catch { }
+        };
+        AppDomain.CurrentDomain.UnhandledException += delegate(object s, UnhandledExceptionEventArgs e)
+        {
+            try { System.IO.File.WriteAllText("viewer_error.log", (e.ExceptionObject as Exception).ToString()); } catch { }
+        };
         Application.Run(new StarFieldViewerForm());
     }
 }

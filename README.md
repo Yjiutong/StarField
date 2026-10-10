@@ -18,6 +18,7 @@ same output — no RNG state, no textures, no engine dependencies (plain C#).
 | ⑤ Full field | `StarField.Generate` | Integrates ①–④; non-star pixels stay black. |
 | ⑥ Twinkle | `StarField.Twinkle*` | Each star's brightness follows a triangle wave whose period/phase derive from its cell hash (0.8–2.6 s default). |
 | ⑦ Streaming viewport | `StarView` | 4 cells resident (current/up/left/up-left); moving NW promotes the former up-left cell; incremental 3 load / 3 unload. |
+| ⑧ Seed codec | `SeedCodec` | 13-character seed codes (letters + digits). Same code → same deterministic hash → identical field. |
 
 ## Layout
 
@@ -26,27 +27,35 @@ StarField/
 ├── src/                  # core library (plain C#, no engine dependency)
 │   ├── StarCut.cs        # cutting, hashing, star masking
 │   ├── StarField.cs      # integrated generator + twinkle + StarAt query
-│   └── StarView.cs       # streaming viewport arithmetic
+│   ├── StarView.cs       # streaming viewport arithmetic
+│   └── SeedCodec.cs      # 13-char seed code validation + deterministic hash
 ├── tests/                # console verification suite
 ├── examples/             # PNG output example
-└── viewer/               # WinForms smooth-cruise demo (1080P, 5px/s, twinkle)
+└── viewer/               # WinForms smooth-cruise demo (1080P, 5px/s, twinkle, seed input)
 ```
 
 ## Build & run (Windows, .NET Framework)
 
 ```bat
 rem Tests
-csc /nologo /out:StarFieldTests.exe src\StarCut.cs src\StarField.cs src\StarView.cs tests\StarFieldTests.cs
+csc /nologo /out:StarFieldTests.exe src\StarCut.cs src\StarField.cs src\StarView.cs src\SeedCodec.cs tests\StarFieldTests.cs
 StarFieldTests.exe
 
 rem PNG example
 csc /nologo /r:System.Drawing.dll /out:StarFieldExample.exe src\StarCut.cs src\StarField.cs examples\Program.cs
 StarFieldExample.exe output
 
-rem Interactive viewer
-csc /nologo /target:winexe /out:StarFieldViewer.exe src\StarCut.cs src\StarField.cs src\StarView.cs viewer\StarFieldViewer.cs
+rem Interactive viewer (enter a 13-char seed code → regenerate the base field)
+csc /nologo /target:winexe /out:StarFieldViewer.exe src\StarCut.cs src\StarField.cs src\StarView.cs src\SeedCodec.cs viewer\StarFieldViewer.cs
 StarFieldViewer.exe
 ```
+
+## Seed codes
+
+A seed is a 13-character string, each character a letter or digit (`0-9A-Za-z`,
+36^13 possible codes). `SeedCodec.Hash` maps any valid code to a deterministic
+32-bit hash used as the generator seed — the same code always produces the
+identical star field. In the viewer, type a code and press "生成底图" (or Enter).
 
 ## Key parameters (`StarField.Default`)
 

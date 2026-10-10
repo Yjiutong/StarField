@@ -88,6 +88,15 @@ static class StarFieldTests
         Assert(load.Length == 3, "StarView: 3 cells loaded after shift");
         Assert(unload.Length == 3, "StarView: 3 cells unloaded after shift");
 
+        // ——— SeedCodec ———
+        Assert(SeedCodec.IsValid("4s5t7gb7s8f75"), "SeedCodec: valid 13-char code accepted");
+        Assert(!SeedCodec.IsValid("abc"), "SeedCodec: too short rejected");
+        Assert(!SeedCodec.IsValid("1234567890ab!"), "SeedCodec: invalid char rejected");
+        Assert(SeedCodec.Hash("4s5t7gb7s8f75") == SeedCodec.Hash("4s5t7gb7s8f75"), "SeedCodec: hash deterministic");
+        Assert(SeedCodec.Hash("4s5t7gb7s8f75") != SeedCodec.Hash("4S5T7GB7S8F75"), "SeedCodec: hash case-sensitive");
+        uint hDec = SeedCodec.DecodeBase36("4s5t7gb7s8f75");
+        Assert(hDec == SeedCodec.DecodeBase36("4s5t7gb7s8f75"), "SeedCodec: base36 decode deterministic");
+
         Console.WriteLine();
         Console.WriteLine("passed={0} failed={1}", passed, failed);
         Environment.Exit(failed == 0 ? 0 : 1);
