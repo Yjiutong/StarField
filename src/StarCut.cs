@@ -94,15 +94,33 @@ namespace StarFieldAlgo
         }
 
         /// <summary>
+        /// Per-star in-cell offset, derived from the cell hash.
+        /// Direction: one of four (up / down / left / right), chosen by a direction hash;
+        /// magnitude: 0..maxOffset (in units of cell half-size), chosen by a magnitude hash.
+        /// Deterministic: same cell + same seed → same offset.
+        /// </summary>
+        public static void StarOffset(int gx, int gy, int seed, float maxOffset, out float offX, out float offY)
+        {
+            offX = 0f; offY = 0f;
+            float dir = CellHash(gx, gy, seed, 0x9A);
+            float mag = CellHash(gx, gy, seed, 0x9B) * maxOffset;
+            if (dir < 0.25f) offY = -mag;        // up
+            else if (dir < 0.5f) offY = mag;     // down
+            else if (dir < 0.75f) offX = -mag;   // left
+            else offX = mag;                     // right
+        }
+
+        /// <summary>
         /// Star mask: each cell is hashed first (must exceed the qualify threshold to host a star),
         /// then a step function compares the in-cell distance to the radius gate derived from that
-        /// cell's hash.
-        /// dist = normalized distance to the cell center (center 0, cell edge ±1).
+        /// cell's hash. The star center is offset from the cell center by a hash-derived
+        /// four-direction offset (StarOffset), so stars are not pinned to cell centers.
+        /// dist = normalized distance to the offset star center (center 0, cell edge ±1).
         /// Square star: |dx| ≤ edge and |dy| ≤ edge; Circle star: dist ≤ edge.
         /// </summary>
         public static byte[] StarMask(int w, int h, int cellW = DefaultCellW, int cellH = DefaultCellH, int seed = 0,
             float qualifyThreshold = 0.5f, float minRadius = 0.06f, float maxRadius = 0.16f,
-            StarShape shape = StarShape.Square)
+            StarShape shape = StarShape.Square, float maxOffset = 0.4f)
         {
             var px = new byte[w * h];
             for (int y = 0; y < h; y++)
@@ -111,9 +129,15 @@ namespace StarFieldAlgo
                     int gx = x / cellW, gy = y / cellH;
                     float hsh = CellHash(gx, gy, seed, 0x5A7);
                     if (hsh <= qualifyThreshold) { px[y * w + x] = 0; continue; }   // no-star cell: black
-                    // In-cell normalized coordinates: center 0, cell edge ±1
-                    float dx = (x - (gx * cellW + cellW * 0.5f)) / (cellW * 0.5f);
-                    float dy = (y - (gy * cellH + cellH * 0.5f)) / (cellH * 0.5f);
+                    // Hash-derived four-direction offset (units of cell half-size)
+                    float offX, offY;
+                    StarOffset(gx, gy, seed, maxOffset, out offX, out offY);
+                    // Star center: cell center + offset
+                    float cx = gx * cellW + cellW * 0.5f + offX * cellW * 0.5f;
+                    float cy = gy * cellH + cellH * 0.5f + offY * cellH * 0.5f;
+                    // In-cell normalized coordinates relative to the offset star center
+                    float dx = (x - cx) / (cellW * 0.5f);
+                    float dy = (y - cy) / (cellH * 0.5f);
                     // Step function: this cell's hash decides the radius gate (larger hash → larger star)
                     float edge = minRadius + (maxRadius - minRadius) * hsh;
                     bool hit = shape == StarShape.Square

@@ -21,6 +21,7 @@ namespace StarFieldAlgo
             public int seed;
             public float qualifyThreshold;
             public float minRadius, maxRadius;
+            public float maxOffset;      // hash-derived four-direction offset (units of cell half-size)
             public StarCut.StarShape shape;
             public StarCut.Combine combine;
         }
@@ -33,6 +34,7 @@ namespace StarFieldAlgo
                 seed = seed,
                 qualifyThreshold = 0.987f,
                 minRadius = 0.02f, maxRadius = 0.05f,   // max star width = 4 star-pixels
+                maxOffset = 0.4f,
                 shape = StarCut.StarShape.Square,
                 combine = StarCut.Combine.XYAverage,
             };
@@ -50,9 +52,14 @@ namespace StarFieldAlgo
                     float hsh = StarCut.CellHash(gx, gy, p.seed, 0x5A7);
                     // Star qualification
                     if (hsh <= p.qualifyThreshold) { px[y * w + x] = 0; continue; }
-                    // In-cell normalized coordinates
-                    float dx = (x - (gx * p.cellW + p.cellW * 0.5f)) / (p.cellW * 0.5f);
-                    float dy = (y - (gy * p.cellH + p.cellH * 0.5f)) / (p.cellH * 0.5f);
+                    // Hash-derived four-direction offset from the cell center
+                    float offX, offY;
+                    StarCut.StarOffset(gx, gy, p.seed, p.maxOffset, out offX, out offY);
+                    float cx = gx * p.cellW + p.cellW * 0.5f + offX * p.cellW * 0.5f;
+                    float cy = gy * p.cellH + p.cellH * 0.5f + offY * p.cellH * 0.5f;
+                    // In-cell normalized coordinates relative to the offset star center
+                    float dx = (x - cx) / (p.cellW * 0.5f);
+                    float dy = (y - cy) / (p.cellH * 0.5f);
                     // Step function: hash decides the radius gate
                     float edge = p.minRadius + (p.maxRadius - p.minRadius) * hsh;
                     bool hit = p.shape == StarCut.StarShape.Square
@@ -78,8 +85,12 @@ namespace StarFieldAlgo
             int gx = (int)Math.Floor(wx / p.cellW), gy = (int)Math.Floor(wy / p.cellH);
             float hsh = StarCut.CellHash(gx, gy, p.seed, 0x5A7);
             if (hsh <= p.qualifyThreshold) return 0;
-            float dx = (wx - (gx * p.cellW + p.cellW * 0.5f)) / (p.cellW * 0.5f);
-            float dy = (wy - (gy * p.cellH + p.cellH * 0.5f)) / (p.cellH * 0.5f);
+            float offX, offY;
+            StarCut.StarOffset(gx, gy, p.seed, p.maxOffset, out offX, out offY);
+            float cx = gx * p.cellW + p.cellW * 0.5f + offX * p.cellW * 0.5f;
+            float cy = gy * p.cellH + p.cellH * 0.5f + offY * p.cellH * 0.5f;
+            float dx = (wx - cx) / (p.cellW * 0.5f);
+            float dy = (wy - cy) / (p.cellH * 0.5f);
             float edge = p.minRadius + (p.maxRadius - p.minRadius) * hsh;
             bool hit = p.shape == StarCut.StarShape.Square
                 ? (Math.Abs(dx) <= edge && Math.Abs(dy) <= edge)

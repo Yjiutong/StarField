@@ -97,6 +97,31 @@ static class StarFieldTests
         uint hDec = SeedCodec.DecodeBase36("4s5t7gb7s8f75");
         Assert(hDec == SeedCodec.DecodeBase36("4s5t7gb7s8f75"), "SeedCodec: base36 decode deterministic");
 
+        // ——— Star offset (four-direction hash offset) ———
+        float ox1, oy1, ox2, oy2, ox3, oy3;
+        StarCut.StarOffset(3, 5, 42, 0.4f, out ox1, out oy1);
+        StarCut.StarOffset(3, 5, 42, 0.4f, out ox2, out oy2);
+        StarCut.StarOffset(3, 5, 99, 0.4f, out ox3, out oy3);
+        Assert(ox1 == ox2 && oy1 == oy2, "StarOffset: deterministic for same cell + seed");
+        Assert(ox1 != ox3 || oy1 != oy3, "StarOffset: different seed → different offset");
+        bool axisOk = (ox1 == 0f || oy1 == 0f) && (Math.Abs(ox1) <= 0.4f) && (Math.Abs(oy1) <= 0.4f);
+        Assert(axisOk, "StarOffset: one axis only, magnitude within [0, maxOffset]");
+        // A star must never leave its own cell: offset (≤0.4 half) + radius gate (≤0.05) < cell edge
+        bool inside = true;
+        var pOff = StarField.Default(42);
+        pOff.maxOffset = 0.4f; pOff.qualifyThreshold = 0.3f;
+        byte[] offField = StarField.Generate(1024, 1024, pOff);
+        for (int y = 0; y < 1024; y++)
+            for (int x = 0; x < 1024; x++)
+            {
+                if (offField[y * 1024 + x] == 0) continue;
+                int gx = x / pOff.cellW, gy = y / pOff.cellH;
+                float ddx = (x - (gx * pOff.cellW + pOff.cellW * 0.5f)) / (pOff.cellW * 0.5f);
+                float ddy = (y - (gy * pOff.cellH + pOff.cellH * 0.5f)) / (pOff.cellH * 0.5f);
+                if (Math.Abs(ddx) > 0.45f + 1e-3f || Math.Abs(ddy) > 0.45f + 1e-3f) { inside = false; break; }
+            }
+        Assert(inside, "StarOffset: stars never leave their own cell (offset 0.4 + radius ≤ 0.45)");
+
         Console.WriteLine();
         Console.WriteLine("passed={0} failed={1}", passed, failed);
         Environment.Exit(failed == 0 ? 0 : 1);
