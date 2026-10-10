@@ -121,6 +121,22 @@ static class StarFieldTests
                 if (Math.Abs(ddx) > 0.45f + 1e-3f || Math.Abs(ddy) > 0.45f + 1e-3f) { inside = false; break; }
             }
         Assert(inside, "StarOffset: stars never leave their own cell (offset 0.4 + radius ≤ 0.45)");
+        // Twinkle must be preserved after offsetting: a star's brightness is still driven by
+        // its qualifying cell hash (period salt 0x77 / phase salt 0x88), independent of position.
+        bool twinkleOk = true;
+        var pTw = StarField.Default(42);
+        pTw.qualifyThreshold = 0.3f; pTw.maxOffset = 0.4f;
+        byte[] twF = StarField.Generate(512, 512, pTw, 0.7f);
+        for (int y = 0; y < 512 && twinkleOk; y++)
+            for (int x = 0; x < 512 && twinkleOk; x++)
+            {
+                byte v = twF[y * 512 + x];
+                if (v == 0) continue;
+                int gx = x / pTw.cellW, gy = y / pTw.cellH;
+                byte expect = (byte)Math.Round(255f * StarField.TwinkleBrightness(gx, gy, pTw.seed, 0.7f));
+                if (v != expect) twinkleOk = false;
+            }
+        Assert(twinkleOk, "Twinkle: brightness still driven by qualifying-cell hash after offset");
 
         Console.WriteLine();
         Console.WriteLine("passed={0} failed={1}", passed, failed);
