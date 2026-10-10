@@ -31,11 +31,28 @@ public class StarCanvas : Control
     float cacheOx, cacheOy;
     float[] twCache;
     int twOx, twOy, twW, twH;
+    byte[] twCacheByte;
     // Reused render buffer (no per-frame allocation) + FPS counter
     Bitmap renderBmp;
     int renderW = -1, renderH = -1;
     int fpsFrames, fpsLastTick;
     public float fpsDisplay;
+    // Cached GDI objects (no per-frame Font allocation / handle churn)
+    Font hudFont = new Font("Consolas", 10);
+    // Per-frame breakdown profiler (every 30 frames writes viewer_perf.log)
+    int perfCount;
+    long perfTFrame, perfTRender, perfTBlit;
+    long stTicks; int stFrameMs;
+
+    // Hardware-assisted stretch blit (COLORONCOLOR) replaces GDI+ DrawImage: GDI+
+    // high-quality scaling is the dominant cost on a 4K full-screen canvas.
+    [DllImport("gdi32.dll")]
+    static extern int SetStretchBltMode(IntPtr hdc, int mode);
+    [DllImport("gdi32.dll")]
+    static extern bool StretchBlt(IntPtr hdcDest, int dx, int dy, int dw, int dh,
+        IntPtr hdcSrc, int sx, int sy, int sw, int sh, uint rop);
+    const int STRETCH_COLORONCOLOR = 3;
+    const uint SRCCOPY = 0x00CC0020;
 
     // Adaptive viewport: the canvas fills the window, so the visible world (in cells)
     // grows with the window. Rendering is capped at 1920x1080 and stretched, keeping
@@ -43,8 +60,9 @@ public class StarCanvas : Control
     int CellZoomPx { get { return Cell * (int)Zoom; } }
     int Cols { get { return Width / CellZoomPx; } }
     int Rows { get { return Height / CellZoomPx; } }
-    int RenderW { get { return Math.Min(Width, 1920); } }
-    int RenderH { get { return Math.Min(Height, 1080); } }
+    public int RenderW { get { return Math.Min(Width, 1920); } }
+    public int RenderH { get { return Math.Min(Height, 1080); } }
+    public float RunTime { get { return (float)(Environment.TickCount / 1000.0) - t0; } }
 
     public StarCanvas(StarFieldAlgo.StarField.Params prm)
     {
@@ -128,23 +146,30 @@ public class StarCanvas : Control
         float time = nowMs / 1000f - t0;
         twOx = view.curX - 1; twOy = view.curY - 1;
         twW = Cols + 3; twH = Rows + 3;
-        if (twCache == null || twCache.Length < twW * twH) twCache = new float[twW * twH];
+        if (twCacheByte == null || twCacheByte.Length < twW * twH) twCacheByte = new byte[twW * twH];
         for (int gy = 0; gy < twH; gy++)
             for (int gx = 0; gx < twW; gx++)
             {
                 // Full breathing chain: breathe factor + 3×3 neighbor suppression.
+                // Stored as 8-bit fixed point (0..255) so the render loop reads a byte.
                 float v = StarFieldAlgo.StarField.SuppressedBrightness(twOx + gx, twOy + gy, p, time);
-                twCache[gy * twW + gx] = v;
+                int vv = (int)(v * 255f);
+                twCacheByte[gy * twW + gx] = (byte)(vv > 255 ? 255 : vv);
             }
     }
 
     protected override void OnPaint(PaintEventArgs e)
     {
         var g = e.Graphics;
-        g.Clear(Color.Black);
+        stFrameMs = Environment.TickCount;
+        stTicks = System.Diagnostics.Stopwatch.GetTimestamp();
+        // No g.Clear: the render buffer is fully opaque and StretchBlt covers every
+        // pixel of the canvas, so a 3.8MP fill per frame would be pure waste.
         // Pixel-art style + fastest stretch: nearest-neighbor scaling (GDI+ default
         // high-quality interpolation would cost ~10x on the full-screen blit).
         g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.NearestNeighbor;
+        // Opaque composition: skips source-alpha blending on the full-screen blit.
+        g.CompositingMode = System.Drawing.Drawing2D.CompositingMode.SourceCopy;
         float time = (float)(Environment.TickCount / 1000.0) - t0;
 
         float baseX = cacheOx - scrollX / Zoom;
@@ -173,7 +198,7 @@ public class StarCanvas : Control
         unsafe
         {
             fixed (byte* sc = starCache)
-            fixed (float* tw = twCache)
+            fixed (byte* tw = twCacheByte)
             {
                 byte* dst0 = (byte*)bd.Scan0;
                 for (int yy = 0; yy < rh; yy++)
@@ -184,6 +209,7 @@ public class StarCanvas : Control
                     if (cacheY < 0) { cacheY = 0; fy = 0f; }
                     else if (cacheY >= cacheHO - 1) { cacheY = cacheHO - 2; fy = 1f; }
                     else fy = worldY - cacheOY - cacheY;
+                    int fyI = (int)(fy * 256f);                  // 8-bit fixed point
                     int row0 = cacheY * cacheWO, row1 = row0 + cacheWO;
                     int gy0 = (int)Math.Floor(worldY / Cell) - twOy0;
                     if (gy0 < 0) gy0 = 0; else if (gy0 >= twH) gy0 = twH - 1;
@@ -197,51 +223,82 @@ public class StarCanvas : Control
                     if (cacheX < 0) { cacheX = 0; fx = 0f; }
                     else if (cacheX >= cacheWO - 1) { cacheX = cacheWO - 2; fx = 1f; }
                     else fx = wx - cacheOX - cacheX;
+                    int fxI = (int)(fx * 256f);                  // 8-bit fixed point
                     int gxCur = (int)Math.Floor(wx / Cell) - twOx0;
                     float cellEdge = (gxCur + twOx0 + 1) * cellW0;
                     if (gxCur < 0) gxCur = 0; else if (gxCur >= twWx) gxCur = twWx - 1;
 
                     for (int xx = 0; xx < rw; xx++)
                     {
-                        float s00 = sc[row0 + cacheX];
-                        float s10 = sc[row0 + cacheX + 1];
-                        float s01 = sc[row1 + cacheX];
-                        float s11 = sc[row1 + cacheX + 1];
-                        float top = s00 + (s10 - s00) * fx;
-                        float bot = s01 + (s11 - s01) * fx;
-                        float star = top + (bot - top) * fy;          // bilinear (0..255)
+                        // Integer fixed-point bilinear (8-bit): much higher throughput
+                        // than float math for 2M pixels/frame.
+                        int s00 = sc[row0 + cacheX];
+                        int s10 = sc[row0 + cacheX + 1];
+                        int s01 = sc[row1 + cacheX];
+                        int s11 = sc[row1 + cacheX + 1];
+                        int invFx = 256 - fxI;
+                        int top = (s00 * invFx + s10 * fxI) >> 8;
+                        int bot = (s01 * invFx + s11 * fxI) >> 8;
+                        int star = (top * (256 - fyI) + bot * fyI) >> 8;   // 0..255
 
                         // Twinkle is bound to the star's OWN cell: stars never cross a cell
                         // boundary (maxOffset + maxRadius <= 0.5 cell edge), so the pixel's
                         // cell IS the star's cell — the whole translated star breathes together.
-                        float bright = tw[twRow + gxCur];
-                        float v = star * bright;
-                        if (v > 255f) v = 255f;
+                        int v = (star * tw[twRow + gxCur]) >> 8;   // byte twinkle (0..255)
+                        if (v > 255) v = 255;
                         byte b = (byte)v;
                         dptr[0] = b; dptr[1] = b; dptr[2] = b;
                         dptr += 3;
 
                         wx += xStepW;
-                        cacheX = (int)wx - cacheOX;
-                        if (cacheX < 0) { cacheX = 0; fx = 0f; }
-                        else if (cacheX >= cacheWO - 1) { cacheX = cacheWO - 2; fx = 1f; }
-                        else fx = wx - cacheOX - cacheX;
+                        fx += xStepW;
+                        if (fx >= 1f) { fx -= 1f; cacheX++; if (cacheX >= cacheWO - 1) { cacheX = cacheWO - 2; fx = 1f; } }
+                        fxI = (int)(fx * 256f);
                         if (wx >= cellEdge) { gxCur++; cellEdge += cellW0; if (gxCur >= twWx) gxCur = twWx - 1; }
                     }
                 }
             }
         }
         renderBmp.UnlockBits(bd);
-        g.DrawImage(renderBmp, 0, 0, Width, Height);
+        perfTRender += (System.Diagnostics.Stopwatch.GetTimestamp() - stTicks);
+        stTicks = System.Diagnostics.Stopwatch.GetTimestamp();
 
-        using (var f = new Font("Consolas", 10))
+        // Stretch blit (hardware/optimized GDI) with COLORONCOLOR, nearest-neighbor
+        // semantics — skips GDI+'s per-pixel scaling loop on the 4K full-screen target.
+        bool blitOk = false;
+        IntPtr dstHdc = IntPtr.Zero, srcHdc = IntPtr.Zero;
+        Graphics srcG = null;
+        try
         {
-            g.DrawString(string.Format("anchor ({0},{1})   smooth cruise 5px/s (sub-pixel)   t={2:F1}s",
-                view.curX, view.curY, time), f, Brushes.White, 8, 0);
-            g.DrawString("auto cruising (Esc=close)", f, Brushes.Orange, 752, 0);
-            g.DrawString(string.Format("seed={0}  hash=0x{1:X8}  (输入13位编码点[生成底图])",
-                currentCode, (uint)p.seed), f, Brushes.LightGreen, 8, 30);
-            g.DrawString(string.Format("render {0}x{1}  fps {2:F0}", rw, rh, fpsDisplay), f, Brushes.Yellow, 8, 60);
+            dstHdc = g.GetHdc();
+            srcG = Graphics.FromImage(renderBmp);
+            srcHdc = srcG.GetHdc();
+            SetStretchBltMode(dstHdc, STRETCH_COLORONCOLOR);
+            blitOk = StretchBlt(dstHdc, 0, 0, Width, Height, srcHdc, 0, 0, rw, rh, SRCCOPY);
+        }
+        finally
+        {
+            if (srcHdc != IntPtr.Zero && srcG != null) srcG.ReleaseHdc(srcHdc);
+            if (dstHdc != IntPtr.Zero) g.ReleaseHdc(dstHdc);
+            if (srcG != null) srcG.Dispose();
+        }
+        if (!blitOk) g.DrawImage(renderBmp, 0, 0, Width, Height);
+        perfTBlit += (System.Diagnostics.Stopwatch.GetTimestamp() - stTicks);
+        perfTFrame += (System.Diagnostics.Stopwatch.GetTimestamp() - stTicks);
+        perfCount++;
+        if (perfCount >= 30)
+        {
+            try
+            {
+                double fr = 1000.0 * perfTFrame / 30 / System.Diagnostics.Stopwatch.Frequency;
+                double rr = 1000.0 * perfTRender / 30 / System.Diagnostics.Stopwatch.Frequency;
+                double br = 1000.0 * perfTBlit / 30 / System.Diagnostics.Stopwatch.Frequency;
+                System.IO.File.AppendAllText(@"E:\StarField\viewer_perf.log",
+                    string.Format("frame={0:F1}ms render={1:F1}ms blit={2:F1}ms fps={3:F0}\r\n",
+                        fr, rr, br, fpsDisplay));
+            }
+            catch { }
+            perfCount = 0; perfTFrame = 0; perfTRender = 0; perfTBlit = 0;
         }
     }
 }
@@ -253,6 +310,12 @@ public class StarFieldViewerForm : Form
     StarCanvas starCanvas;
     Timer timer;
     int lastTitleTick;
+    // 1ms system-timer resolution (timeBeginPeriod) makes the Timer intervals real:
+    // without it the 15.6ms system clock caps the actual rate at ~32Hz.
+    [DllImport("winmm.dll")]
+    static extern uint timeBeginPeriod(uint uPeriod);
+    [DllImport("winmm.dll")]
+    static extern uint timeEndPeriod(uint uPeriod);
 
     // Seed input controls
     TextBox seedBox;
@@ -270,6 +333,12 @@ public class StarFieldViewerForm : Form
     // Neighbor-suppression coefficient control (3×3 linked breathing)
     NumericUpDown suppressBox;
     Label suppressLabel;
+    // Frame-rate control (5..60 fps, default 30)
+    NumericUpDown fpsBox;
+    Label fpsLabel;
+    // HUD overlay labels (form-level, above the canvas): text drawn as Labels, not
+    // per-frame DrawString, to avoid GDI/GDI+ handle mixing after GetHdc/StretchBlt.
+    Label hudAnchor, hudSeed, hudRender;
 
     public StarFieldViewerForm()
     {
@@ -358,14 +427,43 @@ public class StarFieldViewerForm : Form
         suppressLabel = new Label { Left = 1876, Top = 4, Width = 150, Height = 26, ForeColor = Color.LightGreen,
             Font = new Font("Consolas", 10) };
         UpdateSuppressLabel();
+        // Frame-rate target (5..60 fps, default 30): Timer.Interval = 1000/f
+        var fpsCaption = new Label { Left = 2030, Top = 4, Width = 70, Height = 26, Text = "帧率",
+            ForeColor = Color.White, Font = new Font("Microsoft YaHei", 10) };
+        fpsBox = new NumericUpDown { Left = 2104, Top = 0, Width = 60, DecimalPlaces = 0,
+            Minimum = 5m, Maximum = 60m, Increment = 1m, Value = 30m, Font = new Font("Consolas", 10) };
+        fpsBox.ValueChanged += delegate(object s2, EventArgs e2)
+        {
+            int f = (int)fpsBox.Value;
+            // System timer granularity is 15.6ms: map the fps target to a whole number
+            // of ticks (n = round(1000/f / 15.6)), so 60→64fps, 30→32fps, 5→4.9fps…
+            int n = Math.Max(1, (int)Math.Round(64.1 / f));
+            timer.Interval = n <= 1 ? 8 : (int)(n * 15.6);   // n=1 must stay <15.6ms (1 tick)
+            UpdateFpsLabel();
+        };
+        fpsLabel = new Label { Left = 2170, Top = 4, Width = 120, Height = 26, ForeColor = Color.LightGreen,
+            Font = new Font("Consolas", 10) };
+        UpdateFpsLabel();
         Controls.Add(seedCaption); Controls.Add(seedBox); Controls.Add(genBtn); Controls.Add(seedLabel);
         Controls.Add(breatheCaption); Controls.Add(breatheBox); Controls.Add(breatheLabel);
         Controls.Add(offsetCaption); Controls.Add(offsetBox); Controls.Add(offsetLabel);
         Controls.Add(thresholdCaption); Controls.Add(thresholdBox); Controls.Add(thresholdLabel);
         Controls.Add(suppressCaption); Controls.Add(suppressBox); Controls.Add(suppressLabel);
+        Controls.Add(fpsCaption); Controls.Add(fpsBox); Controls.Add(fpsLabel);
         UpdateSeedLabel();
 
-        timer = new Timer { Interval = 16 };   // ~60fps, repaints only the canvas child
+        // HUD overlay labels above the canvas (semi-transparent dark backing).
+        hudAnchor = new Label { Left = 10, Top = 48, Width = 760, Height = 22,
+            ForeColor = Color.White, BackColor = Color.FromArgb(110, 0, 0, 0), Font = new Font("Consolas", 10) };
+        hudSeed = new Label { Left = 10, Top = 74, Width = 760, Height = 22,
+            ForeColor = Color.LightGreen, BackColor = Color.FromArgb(110, 0, 0, 0), Font = new Font("Consolas", 10) };
+        hudRender = new Label { Left = 10, Top = 100, Width = 420, Height = 22,
+            ForeColor = Color.Yellow, BackColor = Color.FromArgb(110, 0, 0, 0), Font = new Font("Consolas", 10) };
+        Controls.Add(hudAnchor); Controls.Add(hudSeed); Controls.Add(hudRender);
+        UpdateHudText();
+
+        timeBeginPeriod(1);   // request 1ms system-timer resolution
+        timer = new Timer { Interval = 31 };   // default 30fps target → 2 ticks ≈ 32fps real
         timer.Tick += delegate(object s, EventArgs e2)
         {
             starCanvas.Tick(Environment.TickCount);
@@ -373,9 +471,19 @@ public class StarFieldViewerForm : Form
             {
                 lastTitleTick = Environment.TickCount;
                 Text = string.Format("Star Field Viewer (fps {0:F0})", starCanvas.fpsDisplay);
+                UpdateHudText();
             }
         };
         timer.Start();
+    }
+
+    void UpdateHudText()
+    {
+        hudAnchor.Text = string.Format("anchor ({0},{1})   smooth cruise 5px/s (sub-pixel)   t={2:F1}s   (Esc=close)",
+            starCanvas.view.curX, starCanvas.view.curY, starCanvas.RunTime);
+        hudSeed.Text = string.Format("seed={0}  hash=0x{1:X8}  (输入13位编码点[生成底图])",
+            starCanvas.currentCode, (uint)starCanvas.p.seed);
+        hudRender.Text = string.Format("render {0}x{1}  fps {2:F0}", starCanvas.RenderW, starCanvas.RenderH, starCanvas.fpsDisplay);
     }
 
     void RegenerateField(string code)
@@ -417,6 +525,12 @@ public class StarFieldViewerForm : Form
     void UpdateSuppressLabel()
     {
         suppressLabel.Text = "suppr=" + suppressBox.Value.ToString("0.00");
+    }
+
+    void UpdateFpsLabel()
+    {
+        int f = (int)fpsBox.Value;
+        fpsLabel.Text = "fps目标=" + f;
     }
 
     protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
