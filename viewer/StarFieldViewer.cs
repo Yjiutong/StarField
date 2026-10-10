@@ -22,7 +22,6 @@ public class StarCanvas : Control
     const int Cell = 40;
     const float Zoom = 2f;
     const float autoSpeed = 5f;    // px/s
-    readonly int viewW, viewH;
 
     float t0;
     float scrollX, scrollY;
@@ -33,9 +32,17 @@ public class StarCanvas : Control
     float[] twCache;
     int twOx, twOy, twW, twH;
 
-    public StarCanvas(int w, int h, StarFieldAlgo.StarField.Params prm)
+    // Adaptive viewport: the canvas fills the window, so the visible world (in cells)
+    // grows with the window. Rendering is capped at 1920x1080 and stretched, keeping
+    // the 1080P pixel budget and a constant star size on any screen.
+    int CellZoomPx { get { return Cell * (int)Zoom; } }
+    int Cols { get { return Width / CellZoomPx; } }
+    int Rows { get { return Height / CellZoomPx; } }
+    int RenderW { get { return Math.Min(Width, 1920); } }
+    int RenderH { get { return Math.Min(Height, 1080); } }
+
+    public StarCanvas(StarFieldAlgo.StarField.Params prm)
     {
-        viewW = w; viewH = h;
         p = prm;
         t0 = (float)(Environment.TickCount / 1000.0);
         lastTick = Environment.TickCount;
@@ -44,6 +51,14 @@ public class StarCanvas : Control
         BackColor = Color.Black;
         RebuildCache();
         UpdateTwinkle(Environment.TickCount);
+    }
+
+    protected override void OnResize(EventArgs e)
+    {
+        base.OnResize(e);
+        RebuildCache();
+        UpdateTwinkle(Environment.TickCount);
+        Invalidate();
     }
 
     public void Regenerate()
@@ -90,8 +105,7 @@ public class StarCanvas : Control
 
     void RebuildCache()
     {
-        int cols = viewW / (Cell * (int)Zoom) + 2;
-        int rows = viewH / (Cell * (int)Zoom) + 2;
+        int cols = Cols + 2, rows = Rows + 2;
         cacheW = cols * Cell; cacheH = rows * Cell;
         cacheOx = (view.curX - 1) * Cell; cacheOy = (view.curY - 1) * Cell;
         starCache = BuildStarRegion((int)cacheOx, (int)cacheOy, cacheW, cacheH);
@@ -101,7 +115,7 @@ public class StarCanvas : Control
     {
         float time = nowMs / 1000f - t0;
         twOx = view.curX - 1; twOy = view.curY - 1;
-        twW = viewW / (Cell * (int)Zoom) + 3; twH = viewH / (Cell * (int)Zoom) + 3;
+        twW = Cols + 3; twH = Rows + 3;
         if (twCache == null || twCache.Length < twW * twH) twCache = new float[twW * twH];
         for (int gy = 0; gy < twH; gy++)
             for (int gx = 0; gx < twW; gx++)
@@ -121,14 +135,19 @@ public class StarCanvas : Control
         float baseY = cacheOy - scrollY / Zoom;
         float invZ = 1f / Zoom;
 
-        var bmp = new Bitmap(viewW, viewH, PixelFormat.Format24bppRgb);
-        var bd = bmp.LockBits(new Rectangle(0, 0, viewW, viewH), ImageLockMode.WriteOnly, PixelFormat.Format24bppRgb);
-        var dst = new byte[bd.Stride * viewH];
+        // Adaptive render: sample up to 1920x1080, stretch to the full canvas.
+        int rw = RenderW, rh = RenderH;
+        float xStep = Width / (float)rw;
+        float yStep = Height / (float)rh;
+
+        var bmp = new Bitmap(rw, rh, PixelFormat.Format24bppRgb);
+        var bd = bmp.LockBits(new Rectangle(0, 0, rw, rh), ImageLockMode.WriteOnly, PixelFormat.Format24bppRgb);
+        var dst = new byte[bd.Stride * rh];
         int twOxx = twOx, twOyy = twOy;
 
-        for (int yy = 0; yy < viewH; yy++)
+        for (int yy = 0; yy < rh; yy++)
         {
-            float worldY = baseY + yy * invZ;
+            float worldY = baseY + yy * yStep * invZ;
             int cacheY = (int)worldY - (int)cacheOy;
             if (cacheY < 0) cacheY = 0; if (cacheY >= cacheH - 1) cacheY = cacheH - 2;
             float fy = worldY - cacheOy - cacheY;
@@ -136,9 +155,9 @@ public class StarCanvas : Control
             int gy0 = (int)Math.Floor(worldY / Cell) - twOyy;
             if (gy0 < 0) gy0 = 0; if (gy0 >= twH) gy0 = twH - 1;
 
-            for (int xx = 0; xx < viewW; xx++)
+            for (int xx = 0; xx < rw; xx++)
             {
-                float worldX = baseX + xx * invZ;
+                float worldX = baseX + xx * xStep * invZ;
                 int cacheX = (int)worldX - (int)cacheOx;
                 if (cacheX < 0) cacheX = 0; if (cacheX >= cacheW - 1) cacheX = cacheW - 2;
                 float fx = worldX - cacheOx - cacheX;
@@ -163,7 +182,7 @@ public class StarCanvas : Control
         }
         Marshal.Copy(dst, 0, bd.Scan0, dst.Length);
         bmp.UnlockBits(bd);
-        g.DrawImage(bmp, 0, 0, viewW, viewH);
+        g.DrawImage(bmp, 0, 0, Width, Height);
         bmp.Dispose();
 
         using (var f = new Font("Consolas", 10))
@@ -197,15 +216,24 @@ public class StarFieldViewerForm : Form
 
     public StarFieldViewerForm()
     {
-        Text = "Star Field Viewer (1080P auto-cruise, twinkling stars)";
+        Text = "Star Field Viewer (adaptive full-screen, 1080P auto-cruise, twinkling stars)";
         var wa = Screen.PrimaryScreen.WorkingArea;
-        ClientSize = new Size(Math.Min(1920, wa.Width - 20), Math.Min(1080, wa.Height - 20));
-        StartPosition = FormStartPosition.CenterScreen;
+        // Adaptive: maximize to fill the whole working area on any resolution.
+        // Window chrome (title bar) is absorbed by the OS during maximize, so the
+        // client area lands exactly on the screen edge.
+        StartPosition = FormStartPosition.Manual;
+        WindowState = FormWindowState.Maximized;
         KeyPreview = true;
 
         p = StarFieldAlgo.StarField.Default((int)SeedCodec.Hash(SeedCodec.ExampleSeed));
         p.qualifyThreshold = 0.6f;   // demo density: keeps enough stars inside the viewport
-        starCanvas = new StarCanvas(1600, 960, p) { Location = new Point(8, 40), Size = new Size(1600, 960) };
+        // Adaptive canvas: fills the window below the HUD row (40px). The visible world
+        // (cell count) grows with the window; rendering stays capped at 1920x1080.
+        starCanvas = new StarCanvas(p) { Location = new Point(0, 40), Size = new Size(wa.Width, wa.Height - 40) };
+        Resize += delegate(object s2, EventArgs e2)
+        {
+            starCanvas.Size = new Size(ClientSize.Width, ClientSize.Height - 40);
+        };
         Controls.Add(starCanvas);
 
         // Seed input row (HUD, above the canvas): 13-char code → regenerate the whole base field
