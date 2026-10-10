@@ -24,6 +24,7 @@ namespace StarFieldAlgo
             public float maxOffset;      // max in-cell offset, full 2D (units of cell half-size); default 0.45
             public float offsetCoeff;    // offset coefficient 0..1: 0 = star stays at cell center, 1 = full maxOffset
             public float twinkleAmplitude;  // base breathe factor 0..1: 0 = constant bright, 1 = full triangle-wave breathe
+            public float suppressCoeff;  // neighbor-suppression coefficient 0..1: how hard a peak cell dims its 8 neighbors
             public StarCut.StarShape shape;
             public StarCut.Combine combine;
         }
@@ -39,6 +40,7 @@ namespace StarFieldAlgo
                 maxOffset = 0.45f,                      // geometry: 0.45 offset + 0.05 radius ≤ 0.5 cell edge
                 offsetCoeff = 1f,
                 twinkleAmplitude = 1f,
+                suppressCoeff = 0.5f,
                 shape = StarCut.StarShape.Square,
                 combine = StarCut.Combine.XYAverage,
             };
@@ -141,6 +143,48 @@ namespace StarFieldAlgo
         {
             float tw = TwinkleBrightness(gx, gy, p.seed, time);
             return 1f + (tw - 1f) * p.twinkleAmplitude;
+        }
+
+        // ————— Neighbor twinkle suppression (3×3 linked breathing) —————
+
+        /// <summary>
+        /// Suppression factor 0..1 applied to cell (gx,gy) because of its 8 neighbors:
+        /// each neighbor n that is currently bright (near its twinkle peak) dims this cell by
+        /// twinkle(n) × coeff × distWeight. The brightest neighbor dominates (max).
+        /// Dist weight: orthogonal neighbors 1.0, diagonal 1/√2 (farther → weaker pull).
+        /// Result: when the center cell of a 3×3 block hits its peak, all 9 cells fall back
+        /// together; when the center reaches its trough, suppression fades and the neighbors
+        /// resume their own breathing. Pure &amp; deterministic.
+        /// </summary>
+        public static float SuppressFactor(int gx, int gy, int seed, float time, float coeff)
+        {
+            float s = 0f;
+            for (int dy = -1; dy <= 1; dy++)
+            {
+                for (int dx = -1; dx <= 1; dx++)
+                {
+                    if (dx == 0 && dy == 0) continue;
+                    float nc = TwinkleBrightness(gx + dx, gy + dy, seed, time);
+                    float w = (dx == 0 || dy == 0) ? 1f : 0.70710678f;
+                    float c = nc * coeff * w;
+                    if (c > s) s = c;
+                }
+            }
+            return s > 1f ? 1f : s;
+        }
+
+        /// <summary>
+        /// Final per-cell brightness with neighbor suppression applied:
+        /// bright = BreatheBrightness × (1 − SuppressFactor), clamped to ≥ 0.
+        /// The cell's own twinkle is NOT suppressed by itself — only its 8 neighbors
+        /// dim it (and it dims them in turn).
+        /// </summary>
+        public static float SuppressedBrightness(int gx, int gy, Params p, float time)
+        {
+            float breathe = BreatheBrightness(gx, gy, p, time);
+            float s = SuppressFactor(gx, gy, p.seed, time, p.suppressCoeff);
+            float v = breathe * (1f - s);
+            return v < 0f ? 0f : v;
         }
     }
 }

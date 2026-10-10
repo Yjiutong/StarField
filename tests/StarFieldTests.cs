@@ -179,6 +179,68 @@ static class StarFieldTests
         Assert(Math.Abs(b05 - (1f + (twV - 1f) * 0.5f)) < 1e-6f, "Breathe: amplitude 0.5 → midpoint of [1, twinkle]");
         Assert(b05 >= 0.5f && b05 <= 1f, "Breathe: brightness stays in [0.5, 1] for amplitude 0.5");
 
+        // ——— Neighbor twinkle suppression (3×3 linked breathing) ———
+        // 1) coeff 0 → no suppression (peers never dim each other).
+        float s0 = StarField.SuppressFactor(5, 5, 42, 0.7f, 0f);
+        Assert(s0 < 1e-6f, "Suppress: coeff 0 → no suppression");
+        // 2) Peak-pull, orthogonal: a bright cell is an orthogonal neighbor of (10,9) with
+        //    weight 1, so its contribution (twinkle × coeff × 1) is always in the max.
+        bool peakOrth = true;
+        for (int t = 0; t < 400 && peakOrth; t++)
+        {
+            float tm = t * 0.005f;
+            float c = StarField.TwinkleBrightness(10, 10, 42, tm);
+            float s = StarField.SuppressFactor(10, 9, 42, tm, 1f);
+            if (s < c - 1e-5f) peakOrth = false;
+        }
+        Assert(peakOrth, "Suppress: bright cell dims its orthogonal neighbor by ≥ its own twinkle");
+        // 3) Peak-pull, diagonal: (10,10) is a diagonal neighbor of (9,9), weight 1/√2.
+        bool peakDiag = true;
+        for (int t = 0; t < 400 && peakDiag; t++)
+        {
+            float tm = t * 0.005f;
+            float c = StarField.TwinkleBrightness(10, 10, 42, tm);
+            float s = StarField.SuppressFactor(9, 9, 42, tm, 1f);
+            if (s < c * 0.70710678f - 1e-4f) peakDiag = false;
+        }
+        Assert(peakDiag, "Suppress: bright cell dims its diagonal neighbor by ≥ twinkle/√2");
+        // 4) SuppressedBrightness is monotone in coeff: higher coeff → darker (when a neighbor is bright).
+        float tPick = 0f;
+        for (int t = 0; t < 200; t++) { float tm = t * 0.02f; if (StarField.TwinkleBrightness(3, 3, 42, tm) > 0.9f) { tPick = tm; break; } }
+        var pSup = StarField.Default(42);
+        pSup.qualifyThreshold = 0.3f; pSup.maxOffset = 0.4f; pSup.twinkleAmplitude = 1f;
+        pSup.suppressCoeff = 0.2f;
+        float brightLow = StarField.SuppressedBrightness(3, 4, pSup, tPick);
+        pSup.suppressCoeff = 0.9f;
+        float brightHigh = StarField.SuppressedBrightness(3, 4, pSup, tPick);
+        Assert(brightHigh < brightLow, "Suppress: stronger coeff → stronger dimming of neighbors");
+        // 5) No suppression (coeff 0) → every cell breathes freely = BreatheBrightness, at every moment.
+        var pFree = StarField.Default(42);
+        pFree.twinkleAmplitude = 1f; pFree.suppressCoeff = 0f;
+        bool freeOk = true;
+        for (int t = 0; t < 200 && freeOk; t++)
+        {
+            float tm = t * 0.02f;
+            for (int g = 0; g < 9 && freeOk; g++)
+            {
+                float v = StarField.SuppressedBrightness(g % 3, g / 3, pFree, tm);
+                float e = StarField.BreatheBrightness(g % 3, g / 3, pFree, tm);
+                if (Math.Abs(v - e) > 1e-5f) freeOk = false;
+            }
+        }
+        Assert(freeOk, "Suppress: coeff 0 → all cells breathe freely (self never suppresses itself)");
+        // 6) Output clamped to ≥ 0 even when suppression exceeds the cell's own brightness.
+        bool clampOk = true;
+        for (int t = 0; t < 400; t++)
+        {
+            float tm = t * 0.02f;
+            var pC = StarField.Default(42);
+            pC.twinkleAmplitude = 1f; pC.suppressCoeff = 3f;   // over-suppression on purpose
+            float v = StarField.SuppressedBrightness(4, 4, pC, tm);
+            if (v < -1e-6f) clampOk = false;
+        }
+        Assert(clampOk, "Suppress: output clamped to ≥ 0 under over-suppression");
+
         Console.WriteLine();
         Console.WriteLine("passed={0} failed={1}", passed, failed);
         Environment.Exit(failed == 0 ? 0 : 1);

@@ -120,8 +120,9 @@ public class StarCanvas : Control
         for (int gy = 0; gy < twH; gy++)
             for (int gx = 0; gx < twW; gx++)
             {
-                float tw = StarFieldAlgo.StarField.TwinkleBrightness(twOx + gx, twOy + gy, p.seed, time);
-                twCache[gy * twW + gx] = 1f + (tw - 1f) * p.twinkleAmplitude;   // base breathe factor
+                // Full breathing chain: breathe factor + 3×3 neighbor suppression.
+                float v = StarFieldAlgo.StarField.SuppressedBrightness(twOx + gx, twOy + gy, p, time);
+                twCache[gy * twW + gx] = v;
             }
     }
 
@@ -223,6 +224,9 @@ public class StarFieldViewerForm : Form
     // Hash threshold control (star qualification: higher = fewer stars)
     NumericUpDown thresholdBox;
     Label thresholdLabel;
+    // Neighbor-suppression coefficient control (3×3 linked breathing)
+    NumericUpDown suppressBox;
+    Label suppressLabel;
 
     public StarFieldViewerForm()
     {
@@ -298,10 +302,24 @@ public class StarFieldViewerForm : Form
         thresholdLabel = new Label { Left = 1556, Top = 4, Width = 150, Height = 26, ForeColor = Color.LightGreen,
             Font = new Font("Consolas", 10) };
         UpdateThresholdLabel();
+        // Neighbor suppression (0 = no 3×3 linked dimming, 1 = peak cell strongly dims its 8 neighbors)
+        var suppressCaption = new Label { Left = 1720, Top = 4, Width = 70, Height = 26, Text = "抑制系数",
+            ForeColor = Color.White, Font = new Font("Microsoft YaHei", 10) };
+        suppressBox = new NumericUpDown { Left = 1794, Top = 0, Width = 76, DecimalPlaces = 2,
+            Minimum = 0m, Maximum = 1m, Increment = 0.05m, Value = 0.5m, Font = new Font("Consolas", 10) };
+        suppressBox.ValueChanged += delegate(object s2, EventArgs e2)
+        {
+            p.suppressCoeff = (float)suppressBox.Value;
+            starCanvas.Invalidate();
+        };
+        suppressLabel = new Label { Left = 1876, Top = 4, Width = 150, Height = 26, ForeColor = Color.LightGreen,
+            Font = new Font("Consolas", 10) };
+        UpdateSuppressLabel();
         Controls.Add(seedCaption); Controls.Add(seedBox); Controls.Add(genBtn); Controls.Add(seedLabel);
         Controls.Add(breatheCaption); Controls.Add(breatheBox); Controls.Add(breatheLabel);
         Controls.Add(offsetCaption); Controls.Add(offsetBox); Controls.Add(offsetLabel);
         Controls.Add(thresholdCaption); Controls.Add(thresholdBox); Controls.Add(thresholdLabel);
+        Controls.Add(suppressCaption); Controls.Add(suppressBox); Controls.Add(suppressLabel);
         UpdateSeedLabel();
 
         timer = new Timer { Interval = 16 };   // ~60fps, repaints only the canvas child
@@ -346,6 +364,11 @@ public class StarFieldViewerForm : Form
     void UpdateThresholdLabel()
     {
         thresholdLabel.Text = "thresh=" + thresholdBox.Value.ToString("0.000");
+    }
+
+    void UpdateSuppressLabel()
+    {
+        suppressLabel.Text = "suppr=" + suppressBox.Value.ToString("0.00");
     }
 
     protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
