@@ -44,16 +44,6 @@ public class StarCanvas : Control
     long perfTFrame, perfTRender, perfTBlit;
     long stTicks; int stFrameMs;
 
-    // Hardware-assisted stretch blit (COLORONCOLOR) replaces GDI+ DrawImage: GDI+
-    // high-quality scaling is the dominant cost on a 4K full-screen canvas.
-    [DllImport("gdi32.dll")]
-    static extern int SetStretchBltMode(IntPtr hdc, int mode);
-    [DllImport("gdi32.dll")]
-    static extern bool StretchBlt(IntPtr hdcDest, int dx, int dy, int dw, int dh,
-        IntPtr hdcSrc, int sx, int sy, int sw, int sh, uint rop);
-    const int STRETCH_COLORONCOLOR = 3;
-    const uint SRCCOPY = 0x00CC0020;
-
     // Adaptive viewport: the canvas fills the window, so the visible world (in cells)
     // grows with the window. Rendering is capped at 1920x1080 and stretched, keeping
     // the 1080P pixel budget and a constant star size on any screen.
@@ -263,26 +253,10 @@ public class StarCanvas : Control
         perfTRender += (System.Diagnostics.Stopwatch.GetTimestamp() - stTicks);
         stTicks = System.Diagnostics.Stopwatch.GetTimestamp();
 
-        // Stretch blit (hardware/optimized GDI) with COLORONCOLOR, nearest-neighbor
-        // semantics — skips GDI+'s per-pixel scaling loop on the 4K full-screen target.
-        bool blitOk = false;
-        IntPtr dstHdc = IntPtr.Zero, srcHdc = IntPtr.Zero;
-        Graphics srcG = null;
-        try
-        {
-            dstHdc = g.GetHdc();
-            srcG = Graphics.FromImage(renderBmp);
-            srcHdc = srcG.GetHdc();
-            SetStretchBltMode(dstHdc, STRETCH_COLORONCOLOR);
-            blitOk = StretchBlt(dstHdc, 0, 0, Width, Height, srcHdc, 0, 0, rw, rh, SRCCOPY);
-        }
-        finally
-        {
-            if (srcHdc != IntPtr.Zero && srcG != null) srcG.ReleaseHdc(srcHdc);
-            if (dstHdc != IntPtr.Zero) g.ReleaseHdc(dstHdc);
-            if (srcG != null) srcG.Dispose();
-        }
-        if (!blitOk) g.DrawImage(renderBmp, 0, 0, Width, Height);
+        // Stretch blit via DrawImage (NearestNeighbor, set above). StretchBlt/GetHdc
+        // was reverted: mixing GDI+ DrawString with GetHdc corrupted the Graphics state
+        // and left the canvas black on some paths — DrawImage is reliable and fast enough.
+        g.DrawImage(renderBmp, 0, 0, Width, Height);
         perfTBlit += (System.Diagnostics.Stopwatch.GetTimestamp() - stTicks);
         perfTFrame += (System.Diagnostics.Stopwatch.GetTimestamp() - stTicks);
         perfCount++;
@@ -339,6 +313,10 @@ public class StarFieldViewerForm : Form
     // HUD overlay labels (form-level, above the canvas): text drawn as Labels, not
     // per-frame DrawString, to avoid GDI/GDI+ handle mixing after GetHdc/StretchBlt.
     Label hudAnchor, hudSeed, hudRender;
+    // Debounced parameter refresh: rapid spinner clicks only commit after 400ms of
+    // inactivity; direct typing commits immediately on Enter / focus-loss.
+    Timer paramDebounce;
+    bool pendingRebuild;
 
     public StarFieldViewerForm()
     {
@@ -363,8 +341,9 @@ public class StarFieldViewerForm : Form
         Controls.Add(starCanvas);
 
         // Seed input row (HUD, above the canvas): 13-char code → regenerate the whole base field
+        Font capFont = new Font("Microsoft YaHei", 10, FontStyle.Bold);
         var seedCaption = new Label { Left = 8, Top = 4, Width = 104, Height = 26, Text = "种子(13位)",
-            ForeColor = Color.White, Font = new Font("Microsoft YaHei", 10) };
+            ForeColor = Color.Gold, Font = capFont };
         seedBox = new TextBox { Left = 118, Top = 0, Width = 210, Font = new Font("Consolas", 12) };
         seedBox.Text = SeedCodec.ExampleSeed;
         genBtn = new Button { Left = 336, Top = 0, Width = 96, Height = 30, Text = "生成底图" };
@@ -377,59 +356,75 @@ public class StarFieldViewerForm : Form
             Font = new Font("Consolas", 10) };
         // Base breathe factor (0 = constant bright, 1 = full twinkle)
         var breatheCaption = new Label { Left = 840, Top = 4, Width = 70, Height = 26, Text = "呼吸系数",
-            ForeColor = Color.White, Font = new Font("Microsoft YaHei", 10) };
+            ForeColor = Color.Gold, Font = capFont };
         breatheBox = new NumericUpDown { Left = 914, Top = 0, Width = 76, DecimalPlaces = 2,
             Minimum = 0m, Maximum = 1m, Increment = 0.05m, Value = 1m, Font = new Font("Consolas", 10) };
         breatheBox.ValueChanged += delegate(object s2, EventArgs e2)
         {
             p.twinkleAmplitude = (float)breatheBox.Value;
-            starCanvas.Invalidate();
+            UpdateBreatheLabel();
+            ScheduleParamUpdate(false);   // breathe: repaint only (twinkle cache re-eval)
         };
+        breatheBox.Leave += delegate { ImmediateParamUpdate(false); };
+        breatheBox.KeyDown += delegate(object s2, KeyEventArgs e2)
+        { if (e2.KeyCode == Keys.Enter) { ImmediateParamUpdate(false); e2.SuppressKeyPress = true; } };
         breatheLabel = new Label { Left = 996, Top = 4, Width = 120, Height = 26, ForeColor = Color.LightGreen,
             Font = new Font("Consolas", 10) };
         UpdateBreatheLabel();
         // Offset coefficient (0 = star at cell center, 1 = full 2D hash offset, maxOffset 0.45)
         var offsetCaption = new Label { Left = 1120, Top = 4, Width = 70, Height = 26, Text = "偏移系数",
-            ForeColor = Color.White, Font = new Font("Microsoft YaHei", 10) };
+            ForeColor = Color.Gold, Font = capFont };
         offsetBox = new NumericUpDown { Left = 1194, Top = 0, Width = 76, DecimalPlaces = 2,
             Minimum = 0m, Maximum = 1m, Increment = 0.05m, Value = 1m, Font = new Font("Consolas", 10) };
         offsetBox.ValueChanged += delegate(object s2, EventArgs e2)
         {
             p.offsetCoeff = (float)offsetBox.Value;
-            starCanvas.RefreshField();
+            UpdateOffsetLabel();
+            ScheduleParamUpdate(true);    // offset: rebuild star mask (new positions)
         };
+        offsetBox.Leave += delegate { ImmediateParamUpdate(true); };
+        offsetBox.KeyDown += delegate(object s2, KeyEventArgs e2)
+        { if (e2.KeyCode == Keys.Enter) { ImmediateParamUpdate(true); e2.SuppressKeyPress = true; } };
         offsetLabel = new Label { Left = 1276, Top = 4, Width = 120, Height = 26, ForeColor = Color.LightGreen,
             Font = new Font("Consolas", 10) };
         UpdateOffsetLabel();
         // Hash threshold (star qualification): higher = fewer stars, lower = denser field
         var thresholdCaption = new Label { Left = 1400, Top = 4, Width = 70, Height = 26, Text = "哈希阈值",
-            ForeColor = Color.White, Font = new Font("Microsoft YaHei", 10) };
+            ForeColor = Color.Gold, Font = capFont };
         thresholdBox = new NumericUpDown { Left = 1474, Top = 0, Width = 76, DecimalPlaces = 3,
             Minimum = 0.01m, Maximum = 1m, Increment = 0.01m, Value = 0.6m, Font = new Font("Consolas", 10) };
         thresholdBox.ValueChanged += delegate(object s2, EventArgs e2)
         {
             p.qualifyThreshold = (float)thresholdBox.Value;
-            starCanvas.RefreshField();
+            UpdateThresholdLabel();
+            ScheduleParamUpdate(true);    // hash threshold: rebuild star mask (star count)
         };
+        thresholdBox.Leave += delegate { ImmediateParamUpdate(true); };
+        thresholdBox.KeyDown += delegate(object s2, KeyEventArgs e2)
+        { if (e2.KeyCode == Keys.Enter) { ImmediateParamUpdate(true); e2.SuppressKeyPress = true; } };
         thresholdLabel = new Label { Left = 1556, Top = 4, Width = 150, Height = 26, ForeColor = Color.LightGreen,
             Font = new Font("Consolas", 10) };
         UpdateThresholdLabel();
         // Neighbor suppression (0 = no 3×3 linked dimming, 1 = peak cell strongly dims its 8 neighbors)
         var suppressCaption = new Label { Left = 1720, Top = 4, Width = 70, Height = 26, Text = "抑制系数",
-            ForeColor = Color.White, Font = new Font("Microsoft YaHei", 10) };
+            ForeColor = Color.Gold, Font = capFont };
         suppressBox = new NumericUpDown { Left = 1794, Top = 0, Width = 76, DecimalPlaces = 2,
             Minimum = 0m, Maximum = 1m, Increment = 0.05m, Value = 0.5m, Font = new Font("Consolas", 10) };
         suppressBox.ValueChanged += delegate(object s2, EventArgs e2)
         {
             p.suppressCoeff = (float)suppressBox.Value;
-            starCanvas.Invalidate();
+            UpdateSuppressLabel();
+            ScheduleParamUpdate(false);   // suppression: repaint only (twinkle re-eval)
         };
+        suppressBox.Leave += delegate { ImmediateParamUpdate(false); };
+        suppressBox.KeyDown += delegate(object s2, KeyEventArgs e2)
+        { if (e2.KeyCode == Keys.Enter) { ImmediateParamUpdate(false); e2.SuppressKeyPress = true; } };
         suppressLabel = new Label { Left = 1876, Top = 4, Width = 150, Height = 26, ForeColor = Color.LightGreen,
             Font = new Font("Consolas", 10) };
         UpdateSuppressLabel();
         // Frame-rate target (5..60 fps, default 30): Timer.Interval = 1000/f
         var fpsCaption = new Label { Left = 2030, Top = 4, Width = 70, Height = 26, Text = "帧率",
-            ForeColor = Color.White, Font = new Font("Microsoft YaHei", 10) };
+            ForeColor = Color.Gold, Font = capFont };
         fpsBox = new NumericUpDown { Left = 2104, Top = 0, Width = 60, DecimalPlaces = 0,
             Minimum = 5m, Maximum = 60m, Increment = 1m, Value = 30m, Font = new Font("Consolas", 10) };
         fpsBox.ValueChanged += delegate(object s2, EventArgs e2)
@@ -463,6 +458,8 @@ public class StarFieldViewerForm : Form
         UpdateHudText();
 
         timeBeginPeriod(1);   // request 1ms system-timer resolution
+        paramDebounce = new Timer { Interval = 400 };   // 400ms inactivity → commit parameter
+        paramDebounce.Tick += delegate(object s2, EventArgs e2) { ExecuteParamUpdate(); };
         timer = new Timer { Interval = 31 };   // default 30fps target → 2 ticks ≈ 32fps real
         timer.Tick += delegate(object s, EventArgs e2)
         {
@@ -531,6 +528,32 @@ public class StarFieldViewerForm : Form
     {
         int f = (int)fpsBox.Value;
         fpsLabel.Text = "fps目标=" + f;
+    }
+
+    // ——— Debounced parameter refresh ———
+    // Spinner clicks commit 400ms after the last change (rapid clicking batches into
+    // one rebuild); direct typing commits immediately on Enter or focus loss.
+    void ScheduleParamUpdate(bool rebuildField)
+    {
+        pendingRebuild = pendingRebuild || rebuildField;
+        paramDebounce.Stop();
+        paramDebounce.Start();
+    }
+
+    void ExecuteParamUpdate()
+    {
+        paramDebounce.Stop();
+        if (pendingRebuild) starCanvas.RefreshField();   // rebuild star mask + repaint
+        else starCanvas.Invalidate();
+        pendingRebuild = false;
+    }
+
+    void ImmediateParamUpdate(bool rebuildField)
+    {
+        paramDebounce.Stop();
+        pendingRebuild = false;
+        if (rebuildField) starCanvas.RefreshField();
+        else starCanvas.Invalidate();
     }
 
     protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
