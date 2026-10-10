@@ -21,7 +21,7 @@ public class StarCanvas : Control
 
     const int Cell = 40;
     const float Zoom = 2f;
-    const float autoSpeed = 5f;    // px/s
+    const float autoSpeed = 5f;    // px/s smooth auto-cruise
 
     float t0;
     float scrollX, scrollY;
@@ -149,8 +149,10 @@ public class StarCanvas : Control
         {
             float worldY = baseY + yy * yStep * invZ;
             int cacheY = (int)worldY - (int)cacheOy;
-            if (cacheY < 0) cacheY = 0; if (cacheY >= cacheH - 1) cacheY = cacheH - 2;
-            float fy = worldY - cacheOy - cacheY;
+            float fy;
+            if (cacheY < 0) { cacheY = 0; fy = 0f; }
+            else if (cacheY >= cacheH - 1) { cacheY = cacheH - 2; fy = 1f; }
+            else fy = worldY - cacheOy - cacheY;
             int row0 = cacheY * cacheW, row1 = (cacheY + 1) * cacheW;
             int gy0 = (int)Math.Floor(worldY / Cell) - twOyy;
             if (gy0 < 0) gy0 = 0; if (gy0 >= twH) gy0 = twH - 1;
@@ -159,8 +161,10 @@ public class StarCanvas : Control
             {
                 float worldX = baseX + xx * xStep * invZ;
                 int cacheX = (int)worldX - (int)cacheOx;
-                if (cacheX < 0) cacheX = 0; if (cacheX >= cacheW - 1) cacheX = cacheW - 2;
-                float fx = worldX - cacheOx - cacheX;
+                float fx;
+                if (cacheX < 0) { cacheX = 0; fx = 0f; }
+                else if (cacheX >= cacheW - 1) { cacheX = cacheW - 2; fx = 1f; }
+                else fx = worldX - cacheOx - cacheX;
                 float s00 = starCache[row0 + cacheX];
                 float s10 = starCache[row0 + cacheX + 1];
                 float s01 = starCache[row1 + cacheX];
@@ -169,6 +173,9 @@ public class StarCanvas : Control
                 float bot = s01 + (s11 - s01) * fx;
                 float star = top + (bot - top) * fy;          // bilinear (0..255)
 
+                // Twinkle is bound to the star's OWN cell: stars never cross a cell
+                // boundary (maxOffset + maxRadius <= 0.5 cell edge), so the pixel's cell
+                // IS the star's cell — the whole translated star breathes together.
                 int gx0 = (int)Math.Floor(worldX / Cell) - twOxx;
                 if (gx0 < 0) gx0 = 0; if (gx0 >= twW) gx0 = twW - 1;
                 float bright = twCache[gy0 * twW + gx0];      // per-cell twinkle (breathe factor applied)
