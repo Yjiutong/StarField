@@ -137,6 +137,20 @@ static class StarFieldTests
                 if (v != expect) twinkleOk = false;
             }
         Assert(twinkleOk, "Twinkle: brightness still driven by qualifying-cell hash after offset");
+        // ——— Base breathe factor ———
+        var pB = StarField.Default(42);
+        pB.qualifyThreshold = 0.3f; pB.maxOffset = 0.4f;
+        pB.twinkleAmplitude = 0f;   // constant bright
+        byte[] f0 = StarField.Generate(256, 256, pB, 0.7f);
+        Assert(f0.All(v => v == 0 || v == 255), "Breathe: amplitude 0 → stars stay constant bright (0 or 255)");
+        float twV = StarField.TwinkleBrightness(3, 7, 42, 0.7f);
+        pB.twinkleAmplitude = 1f;   // full breathe
+        float breatheFull = StarField.BreatheBrightness(3, 7, pB, 0.7f);
+        Assert(Math.Abs(breatheFull - twV) < 1e-6f, "Breathe: amplitude 1 → equals original twinkle");
+        pB.twinkleAmplitude = 0.5f; // half breathe around bright state
+        float b05 = StarField.BreatheBrightness(3, 7, pB, 0.7f);
+        Assert(Math.Abs(b05 - (1f + (twV - 1f) * 0.5f)) < 1e-6f, "Breathe: amplitude 0.5 → midpoint of [1, twinkle]");
+        Assert(b05 >= 0.5f && b05 <= 1f, "Breathe: brightness stays in [0.5, 1] for amplitude 0.5");
 
         Console.WriteLine();
         Console.WriteLine("passed={0} failed={1}", passed, failed);

@@ -22,6 +22,7 @@ namespace StarFieldAlgo
             public float qualifyThreshold;
             public float minRadius, maxRadius;
             public float maxOffset;      // hash-derived four-direction offset (units of cell half-size)
+            public float twinkleAmplitude;  // base breathe factor 0..1: 0 = constant bright, 1 = full triangle-wave breathe
             public StarCut.StarShape shape;
             public StarCut.Combine combine;
         }
@@ -35,6 +36,7 @@ namespace StarFieldAlgo
                 qualifyThreshold = 0.987f,
                 minRadius = 0.02f, maxRadius = 0.05f,   // max star width = 4 star-pixels
                 maxOffset = 0.4f,
+                twinkleAmplitude = 1f,
                 shape = StarCut.StarShape.Square,
                 combine = StarCut.Combine.XYAverage,
             };
@@ -68,7 +70,7 @@ namespace StarFieldAlgo
                     if (hit)
                     {
                         px[y * w + x] = time >= 0f
-                            ? (byte)Math.Round(255f * TwinkleBrightness(gx, gy, p.seed, time))
+                            ? (byte)Math.Round(255f * BreatheBrightness(gx, gy, p, time))
                             : (byte)255;
                         continue;
                     }
@@ -125,6 +127,17 @@ namespace StarFieldAlgo
             float u = (time / T + TwinklePhase(gx, gy, seed)) % 1f;
             // Triangle wave: 0→0.5 brightens (0→1), 0.5→1 fades (1→0)
             return u < 0.5f ? u * 2f : 1f - (u - 0.5f) * 2f;
+        }
+
+        /// <summary>
+        /// Final breathe brightness 0..1 with the base breathe factor applied:
+        /// amplitude 0 → constant bright (1.0); amplitude 1 → full twinkle (0..1 triangle wave);
+        /// in between → scaled breathe around the bright state.
+        /// </summary>
+        public static float BreatheBrightness(int gx, int gy, Params p, float time)
+        {
+            float tw = TwinkleBrightness(gx, gy, p.seed, time);
+            return 1f + (tw - 1f) * p.twinkleAmplitude;
         }
     }
 }
