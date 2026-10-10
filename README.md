@@ -36,6 +36,9 @@ StarField/
 
 ## Build & run (Windows, .NET Framework)
 
+**One-click viewer** — double-click `run_viewer.bat` (root): it compiles the
+sources and launches the interactive demo. Or use the raw commands below:
+
 ```bat
 rem Tests
 csc /nologo /out:StarFieldTests.exe src\StarCut.cs src\StarField.cs src\StarView.cs src\SeedCodec.cs tests\StarFieldTests.cs

@@ -15,3 +15,7 @@ output/
 # OS
 Thumbs.db
 .DS_Store
+
+# Runtime logs
+viewer_perf.log
+viewer_error.log
