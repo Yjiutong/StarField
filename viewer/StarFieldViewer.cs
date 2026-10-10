@@ -220,6 +220,9 @@ public class StarFieldViewerForm : Form
     // Offset coefficient control
     NumericUpDown offsetBox;
     Label offsetLabel;
+    // Hash threshold control (star qualification: higher = fewer stars)
+    NumericUpDown thresholdBox;
+    Label thresholdLabel;
 
     public StarFieldViewerForm()
     {
@@ -282,9 +285,23 @@ public class StarFieldViewerForm : Form
         offsetLabel = new Label { Left = 1276, Top = 4, Width = 120, Height = 26, ForeColor = Color.LightGreen,
             Font = new Font("Consolas", 10) };
         UpdateOffsetLabel();
+        // Hash threshold (star qualification): higher = fewer stars, lower = denser field
+        var thresholdCaption = new Label { Left = 1400, Top = 4, Width = 70, Height = 26, Text = "哈希阈值",
+            ForeColor = Color.White, Font = new Font("Microsoft YaHei", 10) };
+        thresholdBox = new NumericUpDown { Left = 1474, Top = 0, Width = 76, DecimalPlaces = 3,
+            Minimum = 0.01m, Maximum = 1m, Increment = 0.01m, Value = 0.6m, Font = new Font("Consolas", 10) };
+        thresholdBox.ValueChanged += delegate(object s2, EventArgs e2)
+        {
+            p.qualifyThreshold = (float)thresholdBox.Value;
+            starCanvas.RefreshField();
+        };
+        thresholdLabel = new Label { Left = 1556, Top = 4, Width = 150, Height = 26, ForeColor = Color.LightGreen,
+            Font = new Font("Consolas", 10) };
+        UpdateThresholdLabel();
         Controls.Add(seedCaption); Controls.Add(seedBox); Controls.Add(genBtn); Controls.Add(seedLabel);
         Controls.Add(breatheCaption); Controls.Add(breatheBox); Controls.Add(breatheLabel);
         Controls.Add(offsetCaption); Controls.Add(offsetBox); Controls.Add(offsetLabel);
+        Controls.Add(thresholdCaption); Controls.Add(thresholdBox); Controls.Add(thresholdLabel);
         UpdateSeedLabel();
 
         timer = new Timer { Interval = 16 };   // ~60fps, repaints only the canvas child
@@ -324,6 +341,11 @@ public class StarFieldViewerForm : Form
     void UpdateOffsetLabel()
     {
         offsetLabel.Text = "offset=" + offsetBox.Value.ToString("0.00");
+    }
+
+    void UpdateThresholdLabel()
+    {
+        thresholdLabel.Text = "thresh=" + thresholdBox.Value.ToString("0.000");
     }
 
     protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
