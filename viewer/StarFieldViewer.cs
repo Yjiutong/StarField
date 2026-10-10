@@ -12,7 +12,6 @@ using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using StarFieldAlgo;
-
 // ——— Star canvas: owns the field caches and draws the smooth-cruise star field ———
 public class StarCanvas : Control
 {
@@ -51,6 +50,14 @@ public class StarCanvas : Control
     {
         view = new StarView.View { curX = 20, curY = 24 };
         scrollX = 0f; scrollY = 0f;
+        RebuildCache();
+        UpdateTwinkle(Environment.TickCount);
+        Invalidate();
+    }
+
+    // Refresh after parameter changes that alter the star mask (e.g. offset coefficient).
+    public void RefreshField()
+    {
         RebuildCache();
         UpdateTwinkle(Environment.TickCount);
         Invalidate();
@@ -184,6 +191,9 @@ public class StarFieldViewerForm : Form
     // Breathe factor control
     NumericUpDown breatheBox;
     Label breatheLabel;
+    // Offset coefficient control
+    NumericUpDown offsetBox;
+    Label offsetLabel;
 
     public StarFieldViewerForm()
     {
@@ -224,8 +234,22 @@ public class StarFieldViewerForm : Form
         breatheLabel = new Label { Left = 996, Top = 4, Width = 120, Height = 26, ForeColor = Color.LightGreen,
             Font = new Font("Consolas", 10) };
         UpdateBreatheLabel();
+        // Offset coefficient (0 = star at cell center, 1 = full 2D hash offset, maxOffset 0.45)
+        var offsetCaption = new Label { Left = 1120, Top = 4, Width = 70, Height = 26, Text = "偏移系数",
+            ForeColor = Color.White, Font = new Font("Microsoft YaHei", 10) };
+        offsetBox = new NumericUpDown { Left = 1194, Top = 0, Width = 76, DecimalPlaces = 2,
+            Minimum = 0m, Maximum = 1m, Increment = 0.05m, Value = 1m, Font = new Font("Consolas", 10) };
+        offsetBox.ValueChanged += delegate(object s2, EventArgs e2)
+        {
+            p.offsetCoeff = (float)offsetBox.Value;
+            starCanvas.RefreshField();
+        };
+        offsetLabel = new Label { Left = 1276, Top = 4, Width = 120, Height = 26, ForeColor = Color.LightGreen,
+            Font = new Font("Consolas", 10) };
+        UpdateOffsetLabel();
         Controls.Add(seedCaption); Controls.Add(seedBox); Controls.Add(genBtn); Controls.Add(seedLabel);
         Controls.Add(breatheCaption); Controls.Add(breatheBox); Controls.Add(breatheLabel);
+        Controls.Add(offsetCaption); Controls.Add(offsetBox); Controls.Add(offsetLabel);
         UpdateSeedLabel();
 
         timer = new Timer { Interval = 16 };   // ~60fps, repaints only the canvas child
@@ -262,6 +286,11 @@ public class StarFieldViewerForm : Form
         breatheLabel.Text = "breathe=" + breatheBox.Value.ToString("0.00");
     }
 
+    void UpdateOffsetLabel()
+    {
+        offsetLabel.Text = "offset=" + offsetBox.Value.ToString("0.00");
+    }
+
     protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
     {
         if (keyData == Keys.Escape) { Close(); return true; }
@@ -271,9 +300,16 @@ public class StarFieldViewerForm : Form
 
 static class Program
 {
+    [DllImport("user32.dll")]
+    static extern bool SetProcessDPIAware();
+
     [STAThread]
     static void Main()
     {
+        // Without DPI awareness the layout is scaled up by the system DPI (e.g. 125%):
+        // the window's physical width then exceeds the screen and the right-side HUD
+        // controls (offset coefficient) get clipped off-screen.
+        try { SetProcessDPIAware(); } catch { }
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
         Application.ThreadException += delegate(object s, System.Threading.ThreadExceptionEventArgs e)

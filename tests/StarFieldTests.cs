@@ -97,19 +97,46 @@ static class StarFieldTests
         uint hDec = SeedCodec.DecodeBase36("4s5t7gb7s8f75");
         Assert(hDec == SeedCodec.DecodeBase36("4s5t7gb7s8f75"), "SeedCodec: base36 decode deterministic");
 
-        // ——— Star offset (four-direction hash offset) ———
+        // ——— Star offset (full 2D hash offset, whole-square translation) ———
         float ox1, oy1, ox2, oy2, ox3, oy3;
-        StarCut.StarOffset(3, 5, 42, 0.4f, out ox1, out oy1);
-        StarCut.StarOffset(3, 5, 42, 0.4f, out ox2, out oy2);
-        StarCut.StarOffset(3, 5, 99, 0.4f, out ox3, out oy3);
+        StarCut.StarOffset(3, 5, 42, 0.4f, 1f, out ox1, out oy1);
+        StarCut.StarOffset(3, 5, 42, 0.4f, 1f, out ox2, out oy2);
+        StarCut.StarOffset(3, 5, 99, 0.4f, 1f, out ox3, out oy3);
         Assert(ox1 == ox2 && oy1 == oy2, "StarOffset: deterministic for same cell + seed");
         Assert(ox1 != ox3 || oy1 != oy3, "StarOffset: different seed → different offset");
-        bool axisOk = (ox1 == 0f || oy1 == 0f) && (Math.Abs(ox1) <= 0.4f) && (Math.Abs(oy1) <= 0.4f);
-        Assert(axisOk, "StarOffset: one axis only, magnitude within [0, maxOffset]");
-        // A star must never leave its own cell: offset (≤0.4 half) + radius gate (≤0.05) < cell edge
+        Assert(Math.Abs(ox1) <= 0.4f && Math.Abs(oy1) <= 0.4f, "StarOffset: both axes within [−maxOffset, +maxOffset]");
+        // Full 2D: both axes may be non-zero (star lands anywhere in the cell, not only on an axis line)
+        bool bothAxesSeen = false;
+        for (int gy = 0; gy < 64 && !bothAxesSeen; gy++)
+            for (int gx = 0; gx < 64 && !bothAxesSeen; gx++)
+            {
+                float ax, ay;
+                StarCut.StarOffset(gx, gy, 7, 0.45f, 1f, out ax, out ay);
+                if (ax != 0f && ay != 0f) bothAxesSeen = true;
+            }
+        Assert(bothAxesSeen, "StarOffset: full 2D — both axes can be non-zero simultaneously");
+        // Offset coefficient: 0 → centered; scaling is linear; coeff 1 reaches near maxOffset
+        float c0x, c0y, c1x, c1y, c5x, c5y;
+        StarCut.StarOffset(3, 5, 42, 0.45f, 0f, out c0x, out c0y);
+        StarCut.StarOffset(3, 5, 42, 0.45f, 1f, out c1x, out c1y);
+        StarCut.StarOffset(3, 5, 42, 0.45f, 0.5f, out c5x, out c5y);
+        Assert(c0x == 0f && c0y == 0f, "StarOffset: coeff 0 → star stays at cell center");
+        Assert(Math.Abs(c5x - c1x * 0.5f) < 1e-6f && Math.Abs(c5y - c1y * 0.5f) < 1e-6f,
+            "StarOffset: coeff scales offset linearly");
+        float maxSeen = 0f;
+        for (int gy = 0; gy < 64; gy++)
+            for (int gx = 0; gx < 64; gx++)
+            {
+                float ax, ay;
+                StarCut.StarOffset(gx, gy, 7, 0.45f, 1f, out ax, out ay);
+                float m = Math.Max(Math.Abs(ax), Math.Abs(ay));
+                if (m > maxSeen) maxSeen = m;
+            }
+        Assert(maxSeen > 0.44f, "StarOffset: coeff 1 → offset reaches near maxOffset (0.45)");
+        // A star must never leave its own cell: offset (≤0.45 half) + radius gate (≤0.05) ≤ cell edge
         bool inside = true;
         var pOff = StarField.Default(42);
-        pOff.maxOffset = 0.4f; pOff.qualifyThreshold = 0.3f;
+        pOff.maxOffset = 0.45f; pOff.offsetCoeff = 1f; pOff.qualifyThreshold = 0.3f;
         byte[] offField = StarField.Generate(1024, 1024, pOff);
         for (int y = 0; y < 1024; y++)
             for (int x = 0; x < 1024; x++)
@@ -118,9 +145,9 @@ static class StarFieldTests
                 int gx = x / pOff.cellW, gy = y / pOff.cellH;
                 float ddx = (x - (gx * pOff.cellW + pOff.cellW * 0.5f)) / (pOff.cellW * 0.5f);
                 float ddy = (y - (gy * pOff.cellH + pOff.cellH * 0.5f)) / (pOff.cellH * 0.5f);
-                if (Math.Abs(ddx) > 0.45f + 1e-3f || Math.Abs(ddy) > 0.45f + 1e-3f) { inside = false; break; }
+                if (Math.Abs(ddx) > 0.5f + 1e-3f || Math.Abs(ddy) > 0.5f + 1e-3f) { inside = false; break; }
             }
-        Assert(inside, "StarOffset: stars never leave their own cell (offset 0.4 + radius ≤ 0.45)");
+        Assert(inside, "StarOffset: stars never leave their own cell (offset 0.45 + radius ≤ 0.5)");
         // Twinkle must be preserved after offsetting: a star's brightness is still driven by
         // its qualifying cell hash (period salt 0x77 / phase salt 0x88), independent of position.
         bool twinkleOk = true;

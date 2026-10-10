@@ -99,28 +99,37 @@ namespace StarFieldAlgo
         /// magnitude: 0..maxOffset (in units of cell half-size), chosen by a magnitude hash.
         /// Deterministic: same cell + same seed → same offset.
         /// </summary>
-        public static void StarOffset(int gx, int gy, int seed, float maxOffset, out float offX, out float offY)
+        /// <summary>
+        /// Hash-derived in-cell offset for a star (units of cell half-size).
+        /// v0.9: full 2D offset — the star square is TRANSLATED as a whole (shape unchanged, no
+        /// stretching) and may land anywhere inside its cell, not just on an axis line.
+        /// offX = (h_x·2−1) · maxOffset · coeff, offY = (h_y·2−1) · maxOffset · coeff,
+        /// where h_x = CellHash(...,0x9A), h_y = CellHash(...,0x9B).
+        /// Geometry: |offset| ≤ maxOffset and star radius ≤ maxRadius keeps the star inside its
+        /// cell as long as maxOffset + maxRadius ≤ 0.5 (half-size units).
+        /// Deterministic: same cell + seed → same offset.
+        /// </summary>
+        public static void StarOffset(int gx, int gy, int seed, float maxOffset, float coeff,
+            out float offX, out float offY)
         {
-            offX = 0f; offY = 0f;
-            float dir = CellHash(gx, gy, seed, 0x9A);
-            float mag = CellHash(gx, gy, seed, 0x9B) * maxOffset;
-            if (dir < 0.25f) offY = -mag;        // up
-            else if (dir < 0.5f) offY = mag;     // down
-            else if (dir < 0.75f) offX = -mag;   // left
-            else offX = mag;                     // right
+            float hx = CellHash(gx, gy, seed, 0x9A);
+            float hy = CellHash(gx, gy, seed, 0x9B);
+            float amp = maxOffset * coeff;
+            offX = (hx * 2f - 1f) * amp;
+            offY = (hy * 2f - 1f) * amp;
         }
 
         /// <summary>
         /// Star mask: each cell is hashed first (must exceed the qualify threshold to host a star),
         /// then a step function compares the in-cell distance to the radius gate derived from that
         /// cell's hash. The star center is offset from the cell center by a hash-derived
-        /// four-direction offset (StarOffset), so stars are not pinned to cell centers.
+        /// full-2D offset (StarOffset, coeff default 1), so stars are not pinned to cell centers.
         /// dist = normalized distance to the offset star center (center 0, cell edge ±1).
         /// Square star: |dx| ≤ edge and |dy| ≤ edge; Circle star: dist ≤ edge.
         /// </summary>
         public static byte[] StarMask(int w, int h, int cellW = DefaultCellW, int cellH = DefaultCellH, int seed = 0,
             float qualifyThreshold = 0.5f, float minRadius = 0.06f, float maxRadius = 0.16f,
-            StarShape shape = StarShape.Square, float maxOffset = 0.4f)
+            StarShape shape = StarShape.Square, float maxOffset = 0.4f, float offsetCoeff = 1f)
         {
             var px = new byte[w * h];
             for (int y = 0; y < h; y++)
@@ -129,9 +138,9 @@ namespace StarFieldAlgo
                     int gx = x / cellW, gy = y / cellH;
                     float hsh = CellHash(gx, gy, seed, 0x5A7);
                     if (hsh <= qualifyThreshold) { px[y * w + x] = 0; continue; }   // no-star cell: black
-                    // Hash-derived four-direction offset (units of cell half-size)
+                    // Hash-derived full-2D offset (units of cell half-size)
                     float offX, offY;
-                    StarOffset(gx, gy, seed, maxOffset, out offX, out offY);
+                    StarOffset(gx, gy, seed, maxOffset, offsetCoeff, out offX, out offY);
                     // Star center: cell center + offset
                     float cx = gx * cellW + cellW * 0.5f + offX * cellW * 0.5f;
                     float cy = gy * cellH + cellH * 0.5f + offY * cellH * 0.5f;

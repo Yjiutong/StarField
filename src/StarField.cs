@@ -21,7 +21,8 @@ namespace StarFieldAlgo
             public int seed;
             public float qualifyThreshold;
             public float minRadius, maxRadius;
-            public float maxOffset;      // hash-derived four-direction offset (units of cell half-size)
+            public float maxOffset;      // max in-cell offset, full 2D (units of cell half-size); default 0.45
+            public float offsetCoeff;    // offset coefficient 0..1: 0 = star stays at cell center, 1 = full maxOffset
             public float twinkleAmplitude;  // base breathe factor 0..1: 0 = constant bright, 1 = full triangle-wave breathe
             public StarCut.StarShape shape;
             public StarCut.Combine combine;
@@ -35,7 +36,8 @@ namespace StarFieldAlgo
                 seed = seed,
                 qualifyThreshold = 0.987f,
                 minRadius = 0.02f, maxRadius = 0.05f,   // max star width = 4 star-pixels
-                maxOffset = 0.4f,
+                maxOffset = 0.45f,                      // geometry: 0.45 offset + 0.05 radius ≤ 0.5 cell edge
+                offsetCoeff = 1f,
                 twinkleAmplitude = 1f,
                 shape = StarCut.StarShape.Square,
                 combine = StarCut.Combine.XYAverage,
@@ -54,9 +56,10 @@ namespace StarFieldAlgo
                     float hsh = StarCut.CellHash(gx, gy, p.seed, 0x5A7);
                     // Star qualification
                     if (hsh <= p.qualifyThreshold) { px[y * w + x] = 0; continue; }
-                    // Hash-derived four-direction offset from the cell center
+                    // Hash-derived full-2D offset from the cell center (whole-square translation,
+                    // shape unchanged; star may land anywhere inside its cell)
                     float offX, offY;
-                    StarCut.StarOffset(gx, gy, p.seed, p.maxOffset, out offX, out offY);
+                    StarCut.StarOffset(gx, gy, p.seed, p.maxOffset, p.offsetCoeff, out offX, out offY);
                     float cx = gx * p.cellW + p.cellW * 0.5f + offX * p.cellW * 0.5f;
                     float cy = gy * p.cellH + p.cellH * 0.5f + offY * p.cellH * 0.5f;
                     // In-cell normalized coordinates relative to the offset star center
@@ -88,7 +91,7 @@ namespace StarFieldAlgo
             float hsh = StarCut.CellHash(gx, gy, p.seed, 0x5A7);
             if (hsh <= p.qualifyThreshold) return 0;
             float offX, offY;
-            StarCut.StarOffset(gx, gy, p.seed, p.maxOffset, out offX, out offY);
+            StarCut.StarOffset(gx, gy, p.seed, p.maxOffset, p.offsetCoeff, out offX, out offY);
             float cx = gx * p.cellW + p.cellW * 0.5f + offX * p.cellW * 0.5f;
             float cy = gy * p.cellH + p.cellH * 0.5f + offY * p.cellH * 0.5f;
             float dx = (wx - cx) / (p.cellW * 0.5f);
