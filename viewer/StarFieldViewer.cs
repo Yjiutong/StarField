@@ -12,7 +12,9 @@ using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using StarFieldAlgo;
-// ——— Star canvas: owns the field caches and draws the smooth-cruise star field ———
+// ------------------------------------------------------------------
+// Star canvas: owns the field caches and draws the smooth-cruise star field
+// ------------------------------------------------------------------
 public class StarCanvas : Control
 {
     public StarFieldAlgo.StarField.Params p;
@@ -39,7 +41,7 @@ public class StarCanvas : Control
     public float fpsDisplay;
     // Cached GDI objects (no per-frame Font allocation / handle churn)
     Font hudFont = new Font("Consolas", 10);
-    // Debounced param refresh shows immediate feedback: clearing=true → canvas stays
+    // Debounced param refresh shows immediate feedback: clearing=true 鈫?canvas stays
     // black until the mask rebuild commits (see ClearNow / RefreshField).
     public bool clearing;
     // Per-frame breakdown profiler (every 30 frames writes viewer_perf.log)
@@ -96,7 +98,7 @@ public class StarCanvas : Control
     }
 
     /// <summary>Immediate visual feedback: blank the canvas now; the mask rebuild
-    /// (debounced) commits later via RefreshField. Used so "thresh=1 → 0 stars" is
+    /// (debounced) commits later via RefreshField. Used so "thresh=1 鈫?0 stars" is
     /// seen instantly instead of after the 400ms debounce.</summary>
     public void ClearNow()
     {
@@ -153,7 +155,7 @@ public class StarCanvas : Control
         for (int gy = 0; gy < twH; gy++)
             for (int gx = 0; gx < twW; gx++)
             {
-                // Full breathing chain: breathe factor + 3×3 neighbor suppression.
+                // Full breathing chain: breathe factor + 3脳3 neighbor suppression.
                 // Stored as 8-bit fixed point (0..255) so the render loop reads a byte.
                 float v = StarFieldAlgo.StarField.SuppressedBrightness(twOx + gx, twOy + gy, p, time);
                 int vv = (int)(v * 255f);
@@ -251,7 +253,7 @@ public class StarCanvas : Control
 
                         // Twinkle is bound to the star's OWN cell: stars never cross a cell
                         // boundary (maxOffset + maxRadius <= 0.5 cell edge), so the pixel's
-                        // cell IS the star's cell — the whole translated star breathes together.
+                        // cell IS the star's cell - the whole translated star breathes together.
                         int v = (star * tw[twRow + gxCur]) >> 8;   // byte twinkle (0..255)
                         if (v > 255) v = 255;
                         byte b = (byte)v;
@@ -273,7 +275,7 @@ public class StarCanvas : Control
 
         // Stretch blit via DrawImage (NearestNeighbor, set above). StretchBlt/GetHdc
         // was reverted: mixing GDI+ DrawString with GetHdc corrupted the Graphics state
-        // and left the canvas black on some paths — DrawImage is reliable and fast enough.
+        // and left the canvas black on some paths - DrawImage is reliable and fast enough.
         g.DrawImage(renderBmp, 0, 0, Width, Height);
         perfTBlit += (System.Diagnostics.Stopwatch.GetTimestamp() - stTicks);
         perfTFrame += (System.Diagnostics.Stopwatch.GetTimestamp() - stTicks);
@@ -295,7 +297,9 @@ public class StarCanvas : Control
     }
 }
 
-// ——— Main form: layout only, owns the HUD input row ———
+// ------------------------------------------------------------------
+// Main form: layout only, owns the HUD input row
+// ------------------------------------------------------------------
 public class StarFieldViewerForm : Form
 {
     StarFieldAlgo.StarField.Params p;
@@ -322,7 +326,7 @@ public class StarFieldViewerForm : Form
     // Hash threshold control (star qualification: higher = fewer stars)
     NumericUpDown thresholdBox;
     Label thresholdLabel;
-    // Neighbor-suppression coefficient control (3×3 linked breathing)
+    // Neighbor-suppression coefficient control (3脳3 linked breathing)
     NumericUpDown suppressBox;
     Label suppressLabel;
     // Frame-rate control (5..60 fps, default 30)
@@ -348,7 +352,6 @@ public class StarFieldViewerForm : Form
         KeyPreview = true;
 
         p = StarFieldAlgo.StarField.Default((int)SeedCodec.Hash(SeedCodec.ExampleSeed));
-        p.qualifyThreshold = 0.6f;   // demo density: keeps enough stars inside the viewport
         // Adaptive canvas: fills the window below the HUD row (40px). The visible world
         // (cell count) grows with the window; rendering stays capped at 1920x1080.
         starCanvas = new StarCanvas(p) { Location = new Point(0, 40), Size = new Size(wa.Width, wa.Height - 40) };
@@ -358,7 +361,7 @@ public class StarFieldViewerForm : Form
         };
         Controls.Add(starCanvas);
 
-        // Seed input row (HUD, above the canvas): 13-char code → regenerate the whole base field
+        // Seed input row (HUD, above the canvas): 13-char code 鈫?regenerate the whole base field
         Font capFont = new Font("Microsoft YaHei", 10, FontStyle.Bold);
         var seedCaption = new Label { Left = 8, Top = 4, Width = 104, Height = 26, Text = "种子(13位)",
             ForeColor = Color.Gold, Font = capFont };
@@ -373,7 +376,7 @@ public class StarFieldViewerForm : Form
         seedLabel = new Label { Left = 448, Top = 4, Width = 380, Height = 26, ForeColor = Color.LightGray,
             Font = new Font("Consolas", 10) };
         // Base breathe factor (0 = constant bright, 1 = full twinkle)
-        var breatheCaption = new Label { Left = 840, Top = 4, Width = 70, Height = 26, Text = "呼吸系数",
+        var breatheCaption = new Label { Left = 840, Top = 4, Width = 70, Height = 26, Text = "鍛煎惛绯绘暟",
             ForeColor = Color.Gold, Font = capFont };
         breatheBox = new NumericUpDown { Left = 914, Top = 0, Width = 76, DecimalPlaces = 2,
             Minimum = 0m, Maximum = 1m, Increment = 0.05m, Value = 1m, Font = new Font("Consolas", 10) };
@@ -390,7 +393,7 @@ public class StarFieldViewerForm : Form
             Font = new Font("Consolas", 10) };
         UpdateBreatheLabel();
         // Offset coefficient (0 = star at cell center, 1 = full 2D hash offset, maxOffset 0.45)
-        var offsetCaption = new Label { Left = 1120, Top = 4, Width = 70, Height = 26, Text = "偏移系数",
+        var offsetCaption = new Label { Left = 1120, Top = 4, Width = 70, Height = 26, Text = "鍋忕Щ绯绘暟",
             ForeColor = Color.Gold, Font = capFont };
         offsetBox = new NumericUpDown { Left = 1194, Top = 0, Width = 76, DecimalPlaces = 2,
             Minimum = 0m, Maximum = 1m, Increment = 0.05m, Value = 1m, Font = new Font("Consolas", 10) };
@@ -417,14 +420,19 @@ public class StarFieldViewerForm : Form
             UpdateThresholdLabel();
             ScheduleParamUpdate(true);    // hash threshold: rebuild star mask (star count)
         };
+        // Initial sync: the spinner value is set before the ValueChanged hookup, so push
+        // it into p explicitly (the hard-coded 0.6f on p was removed - HUD and render
+        // must always agree, and thresh=1.0 must yield 0 stars).
+        p.qualifyThreshold = (float)thresholdBox.Value;
+        starCanvas.RefreshField();
         thresholdBox.Leave += delegate { ImmediateParamUpdate(true); };
         thresholdBox.KeyDown += delegate(object s2, KeyEventArgs e2)
         { if (e2.KeyCode == Keys.Enter) { ImmediateParamUpdate(true); e2.SuppressKeyPress = true; } };
         thresholdLabel = new Label { Left = 1556, Top = 4, Width = 150, Height = 26, ForeColor = Color.LightGreen,
             Font = new Font("Consolas", 10) };
         UpdateThresholdLabel();
-        // Neighbor suppression (0 = no 3×3 linked dimming, 1 = peak cell strongly dims its 8 neighbors)
-        var suppressCaption = new Label { Left = 1720, Top = 4, Width = 70, Height = 26, Text = "抑制系数",
+        // Neighbor suppression (0 = no 3脳3 linked dimming, 1 = peak cell strongly dims its 8 neighbors)
+        var suppressCaption = new Label { Left = 1720, Top = 4, Width = 70, Height = 26, Text = "鎶戝埗绯绘暟",
             ForeColor = Color.Gold, Font = capFont };
         suppressBox = new NumericUpDown { Left = 1794, Top = 0, Width = 76, DecimalPlaces = 2,
             Minimum = 0m, Maximum = 1m, Increment = 0.05m, Value = 0.5m, Font = new Font("Consolas", 10) };
@@ -441,7 +449,7 @@ public class StarFieldViewerForm : Form
             Font = new Font("Consolas", 10) };
         UpdateSuppressLabel();
         // Frame-rate target (5..60 fps, default 30): Timer.Interval = 1000/f
-        var fpsCaption = new Label { Left = 2030, Top = 4, Width = 70, Height = 26, Text = "帧率",
+        var fpsCaption = new Label { Left = 2030, Top = 4, Width = 70, Height = 26, Text = "甯х巼",
             ForeColor = Color.Gold, Font = capFont };
         fpsBox = new NumericUpDown { Left = 2104, Top = 0, Width = 60, DecimalPlaces = 0,
             Minimum = 5m, Maximum = 60m, Increment = 1m, Value = 30m, Font = new Font("Consolas", 10) };
@@ -449,7 +457,7 @@ public class StarFieldViewerForm : Form
         {
             int f = (int)fpsBox.Value;
             // System timer granularity is 15.6ms: map the fps target to a whole number
-            // of ticks (n = round(1000/f / 15.6)), so 60→64fps, 30→32fps, 5→4.9fps…
+            // of ticks (n = round(1000/f / 15.6)), so 60->4fps, 30->2fps, 5->.9fps.
             int n = Math.Max(1, (int)Math.Round(64.1 / f));
             timer.Interval = n <= 1 ? 8 : (int)(n * 15.6);   // n=1 must stay <15.6ms (1 tick)
             UpdateFpsLabel();
@@ -476,9 +484,9 @@ public class StarFieldViewerForm : Form
         UpdateHudText();
 
         timeBeginPeriod(1);   // request 1ms system-timer resolution
-        paramDebounce = new Timer { Interval = 400 };   // 400ms inactivity → commit parameter
+        paramDebounce = new Timer { Interval = 400 };   // 400ms inactivity 鈫?commit parameter
         paramDebounce.Tick += delegate(object s2, EventArgs e2) { ExecuteParamUpdate(); };
-        timer = new Timer { Interval = 31 };   // default 30fps target → 2 ticks ≈ 32fps real
+        timer = new Timer { Interval = 31 };   // default 30fps target 鈫?2 ticks 鈮?32fps real
         timer.Tick += delegate(object s, EventArgs e2)
         {
             starCanvas.Tick(Environment.TickCount);
@@ -545,10 +553,12 @@ public class StarFieldViewerForm : Form
     void UpdateFpsLabel()
     {
         int f = (int)fpsBox.Value;
-        fpsLabel.Text = "fps目标=" + f;
+        fpsLabel.Text = "fps鐩爣=" + f;
     }
 
-    // ——— Debounced parameter refresh ———
+    // ------------------------------------------------------------------
+    // Debounced parameter refresh
+    // ------------------------------------------------------------------
     // Spinner clicks commit 400ms after the last change (rapid clicking batches into
     // one rebuild); direct typing commits immediately on Enter or focus loss.
     void ScheduleParamUpdate(bool rebuildField)

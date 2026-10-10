@@ -1,21 +1,24 @@
-using System;
+﻿using System;
 
 namespace StarFieldAlgo
 {
     /// <summary>
     /// Complete star-field generator (integrates all four algorithm steps).
     /// Flow:
-    ///   ① Cut gradient: StarCut.Value (vertical + horizontal averaged);
-    ///   ② Per-cell hash: StarCut.CellHash (deterministic per-cell coordinate hash);
-    ///   ③ Star qualification: cells with hash &gt; qualifyThreshold host stars;
-    ///   ④ Star shape: in-cell normalized coordinates + step function (Square / Circle).
+    ///   鈶?Cut gradient: StarCut.Value (vertical + horizontal averaged);
+    ///   鈶?Per-cell hash: StarCut.CellHash (deterministic per-cell coordinate hash);
+    ///   鈶?Star qualification: cells with hash &gt; qualifyThreshold host stars;
+    ///   鈶?Star shape: in-cell normalized coordinates + step function (Square / Circle).
     /// Output: star pixels = white (255), optionally modulated by per-star twinkle;
     /// non-star pixels = black.
-    /// Pure, deterministic: same parameters → identical star field.
+    /// Pure, deterministic: same parameters 鈫?identical star field.
     /// </summary>
     public static class StarField
     {
-        public struct Params
+        // NOTE: class (reference type) on purpose — the viewer form and the canvas
+        // share one Params instance; struct copy semantics silently froze the canvas
+        // at its construction-time values (HUD changed, render never did).
+        public class Params
         {
             public int cellW, cellH;
             public int seed;
@@ -37,7 +40,7 @@ namespace StarFieldAlgo
                 seed = seed,
                 qualifyThreshold = 0.987f,
                 minRadius = 0.02f, maxRadius = 0.05f,   // max star width = 4 star-pixels
-                maxOffset = 0.45f,                      // geometry: 0.45 offset + 0.05 radius ≤ 0.5 cell edge
+                maxOffset = 0.45f,                      // geometry: 0.45 offset + 0.05 radius 鈮?0.5 cell edge
                 offsetCoeff = 1f,
                 twinkleAmplitude = 1f,
                 suppressCoeff = 0.5f,
@@ -46,7 +49,7 @@ namespace StarFieldAlgo
             };
         }
 
-        /// <summary>Generate the final star-field grayscale (0..255). With time ≥ 0, each star's brightness follows its own hash-derived twinkle period.</summary>
+        /// <summary>Generate the final star-field grayscale (0..255). With time 鈮?0, each star's brightness follows its own hash-derived twinkle period.</summary>
         public static byte[] Generate(int w, int h, Params p, float time = -1f)
         {
             var px = new byte[w * h];
@@ -106,7 +109,6 @@ namespace StarFieldAlgo
         }
 
         // ————— Per-star continuous twinkle (period derived from the cell coordinate hash) —————
-
         /// <summary>Twinkle period (seconds): derived from the star's cell hash, range [minT, maxT].</summary>
         public static float TwinklePeriod(int gx, int gy, int seed, float minT = 0.8f, float maxT = 2.6f)
         {
@@ -120,9 +122,9 @@ namespace StarFieldAlgo
         }
 
         /// <summary>
-        /// Twinkle brightness 0..1: triangle wave (brighten fast → fade slow → dark → brighten again),
+        /// Twinkle brightness 0..1: triangle wave (brighten fast 鈫?fade slow 鈫?dark 鈫?brighten again),
         /// period = TwinklePeriod, phases staggered.
-        /// Same cell + same time → same brightness (deterministic).
+        /// Same cell + same time 鈫?same brightness (deterministic).
         /// </summary>
         public static float TwinkleBrightness(int gx, int gy, int seed, float time,
             float minT = 0.8f, float maxT = 2.6f)
@@ -130,14 +132,14 @@ namespace StarFieldAlgo
             float T = TwinklePeriod(gx, gy, seed, minT, maxT);
             if (T <= 0f) return 1f;
             float u = (time / T + TwinklePhase(gx, gy, seed)) % 1f;
-            // Triangle wave: 0→0.5 brightens (0→1), 0.5→1 fades (1→0)
+            // Triangle wave: 0鈫?.5 brightens (0鈫?), 0.5鈫? fades (1鈫?)
             return u < 0.5f ? u * 2f : 1f - (u - 0.5f) * 2f;
         }
 
         /// <summary>
         /// Final breathe brightness 0..1 with the base breathe factor applied:
-        /// amplitude 0 → constant bright (1.0); amplitude 1 → full twinkle (0..1 triangle wave);
-        /// in between → scaled breathe around the bright state.
+        /// amplitude 0 鈫?constant bright (1.0); amplitude 1 鈫?full twinkle (0..1 triangle wave);
+        /// in between 鈫?scaled breathe around the bright state.
         /// </summary>
         public static float BreatheBrightness(int gx, int gy, Params p, float time)
         {
@@ -146,13 +148,12 @@ namespace StarFieldAlgo
         }
 
         // ————— Neighbor twinkle suppression (3×3 linked breathing) —————
-
         /// <summary>
         /// Suppression factor 0..1 applied to cell (gx,gy) because of its 8 neighbors:
         /// each neighbor n that is currently bright (near its twinkle peak) dims this cell by
-        /// twinkle(n) × coeff × distWeight. The brightest neighbor dominates (max).
-        /// Dist weight: orthogonal neighbors 1.0, diagonal 1/√2 (farther → weaker pull).
-        /// Result: when the center cell of a 3×3 block hits its peak, all 9 cells fall back
+        /// twinkle(n) 脳 coeff 脳 distWeight. The brightest neighbor dominates (max).
+        /// Dist weight: orthogonal neighbors 1.0, diagonal 1/鈭? (farther 鈫?weaker pull).
+        /// Result: when the center cell of a 3脳3 block hits its peak, all 9 cells fall back
         /// together; when the center reaches its trough, suppression fades and the neighbors
         /// resume their own breathing. Pure &amp; deterministic.
         /// </summary>
@@ -175,7 +176,7 @@ namespace StarFieldAlgo
 
         /// <summary>
         /// Final per-cell brightness with neighbor suppression applied:
-        /// bright = BreatheBrightness × (1 − SuppressFactor), clamped to ≥ 0.
+        /// bright = BreatheBrightness 脳 (1 鈭?SuppressFactor), clamped to 鈮?0.
         /// The cell's own twinkle is NOT suppressed by itself — only its 8 neighbors
         /// dim it (and it dims them in turn).
         /// </summary>
