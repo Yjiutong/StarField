@@ -39,6 +39,9 @@ public class StarCanvas : Control
     public float fpsDisplay;
     // Cached GDI objects (no per-frame Font allocation / handle churn)
     Font hudFont = new Font("Consolas", 10);
+    // Debounced param refresh shows immediate feedback: clearing=true → canvas stays
+    // black until the mask rebuild commits (see ClearNow / RefreshField).
+    public bool clearing;
     // Per-frame breakdown profiler (every 30 frames writes viewer_perf.log)
     int perfCount;
     long perfTFrame, perfTRender, perfTBlit;
@@ -86,8 +89,18 @@ public class StarCanvas : Control
     // Refresh after parameter changes that alter the star mask (e.g. offset coefficient).
     public void RefreshField()
     {
+        clearing = false;   // commit: stop the black feedback frame
         RebuildCache();
         UpdateTwinkle(Environment.TickCount);
+        Invalidate();
+    }
+
+    /// <summary>Immediate visual feedback: blank the canvas now; the mask rebuild
+    /// (debounced) commits later via RefreshField. Used so "thresh=1 → 0 stars" is
+    /// seen instantly instead of after the 400ms debounce.</summary>
+    public void ClearNow()
+    {
+        clearing = true;
         Invalidate();
     }
 
@@ -153,13 +166,18 @@ public class StarCanvas : Control
         var g = e.Graphics;
         stFrameMs = Environment.TickCount;
         stTicks = System.Diagnostics.Stopwatch.GetTimestamp();
-        // No g.Clear: the render buffer is fully opaque and StretchBlt covers every
-        // pixel of the canvas, so a 3.8MP fill per frame would be pure waste.
         // Pixel-art style + fastest stretch: nearest-neighbor scaling (GDI+ default
         // high-quality interpolation would cost ~10x on the full-screen blit).
         g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.NearestNeighbor;
         // Opaque composition: skips source-alpha blending on the full-screen blit.
         g.CompositingMode = System.Drawing.Drawing2D.CompositingMode.SourceCopy;
+        if (clearing)
+        {
+            // Debounce feedback: blank the whole canvas immediately. The commit
+            // (RefreshField) rebuilds the mask and clears this flag.
+            g.Clear(Color.Black);
+            return;
+        }
         float time = (float)(Environment.TickCount / 1000.0) - t0;
 
         float baseX = cacheOx - scrollX / Zoom;
@@ -536,6 +554,9 @@ public class StarFieldViewerForm : Form
     void ScheduleParamUpdate(bool rebuildField)
     {
         pendingRebuild = pendingRebuild || rebuildField;
+        // Immediate visual feedback: blank the canvas now; the debounced commit
+        // rebuilds the mask 400ms after the last change.
+        starCanvas.ClearNow();
         paramDebounce.Stop();
         paramDebounce.Start();
     }
