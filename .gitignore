@@ -1,0 +1,17 @@
+# Build outputs
+*.exe
+*.dll
+*.pdb
+
+# Example output images
+output/
+*.png
+
+# VS / IDE
+.vs/
+.idea/
+*.user
+
+# OS
+Thumbs.db
+.DS_Store
