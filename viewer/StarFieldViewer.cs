@@ -31,6 +31,11 @@ public class StarCanvas : Control
     float cacheOx, cacheOy;
     float[] twCache;
     int twOx, twOy, twW, twH;
+    // Reused render buffer (no per-frame allocation) + FPS counter
+    Bitmap renderBmp;
+    int renderW = -1, renderH = -1;
+    int fpsFrames, fpsLastTick;
+    public float fpsDisplay;
 
     // Adaptive viewport: the canvas fills the window, so the visible world (in cells)
     // grows with the window. Rendering is capped at 1920x1080 and stretched, keeping
@@ -91,6 +96,13 @@ public class StarCanvas : Control
             RebuildCache();
         }
         UpdateTwinkle(nowMs);
+        // FPS counter (1s window)
+        fpsFrames++;
+        if (nowMs - fpsLastTick >= 1000)
+        {
+            fpsDisplay = fpsFrames * 1000f / (nowMs - fpsLastTick);
+            fpsFrames = 0; fpsLastTick = nowMs;
+        }
         Invalidate();
     }
 
@@ -130,6 +142,9 @@ public class StarCanvas : Control
     {
         var g = e.Graphics;
         g.Clear(Color.Black);
+        // Pixel-art style + fastest stretch: nearest-neighbor scaling (GDI+ default
+        // high-quality interpolation would cost ~10x on the full-screen blit).
+        g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.NearestNeighbor;
         float time = (float)(Environment.TickCount / 1000.0) - t0;
 
         float baseX = cacheOx - scrollX / Zoom;
@@ -138,60 +153,86 @@ public class StarCanvas : Control
 
         // Adaptive render: sample up to 1920x1080, stretch to the full canvas.
         int rw = RenderW, rh = RenderH;
-        float xStep = Width / (float)rw;
-        float yStep = Height / (float)rh;
+        float xStepW = (Width / (float)rw) * invZ;   // world px per render px (x)
+        float yStepW = (Height / (float)rh) * invZ;  // world px per render px (y)
 
-        var bmp = new Bitmap(rw, rh, PixelFormat.Format24bppRgb);
-        var bd = bmp.LockBits(new Rectangle(0, 0, rw, rh), ImageLockMode.WriteOnly, PixelFormat.Format24bppRgb);
-        var dst = new byte[bd.Stride * rh];
-        int twOxx = twOx, twOyy = twOy;
-
-        for (int yy = 0; yy < rh; yy++)
+        // Reuse the render buffer: no per-frame 6MB allocation / GC pressure.
+        if (renderBmp == null || renderW != rw || renderH != rh)
         {
-            float worldY = baseY + yy * yStep * invZ;
-            int cacheY = (int)worldY - (int)cacheOy;
-            float fy;
-            if (cacheY < 0) { cacheY = 0; fy = 0f; }
-            else if (cacheY >= cacheH - 1) { cacheY = cacheH - 2; fy = 1f; }
-            else fy = worldY - cacheOy - cacheY;
-            int row0 = cacheY * cacheW, row1 = (cacheY + 1) * cacheW;
-            int gy0 = (int)Math.Floor(worldY / Cell) - twOyy;
-            if (gy0 < 0) gy0 = 0; if (gy0 >= twH) gy0 = twH - 1;
+            if (renderBmp != null) renderBmp.Dispose();
+            renderBmp = new Bitmap(rw, rh, PixelFormat.Format24bppRgb);
+            renderW = rw; renderH = rh;
+        }
+        var bd = renderBmp.LockBits(new Rectangle(0, 0, rw, rh), ImageLockMode.WriteOnly, PixelFormat.Format24bppRgb);
+        int stride = bd.Stride;
+        int cacheWO = cacheW, cacheHO = cacheH;
+        int cacheOX = (int)cacheOx, cacheOY = (int)cacheOy;
+        int twWx = twW, twOx0 = twOx, twOy0 = twOy;
+        int cellW0 = Cell;
 
-            for (int xx = 0; xx < rw; xx++)
+        unsafe
+        {
+            fixed (byte* sc = starCache)
+            fixed (float* tw = twCache)
             {
-                float worldX = baseX + xx * xStep * invZ;
-                int cacheX = (int)worldX - (int)cacheOx;
-                float fx;
-                if (cacheX < 0) { cacheX = 0; fx = 0f; }
-                else if (cacheX >= cacheW - 1) { cacheX = cacheW - 2; fx = 1f; }
-                else fx = worldX - cacheOx - cacheX;
-                float s00 = starCache[row0 + cacheX];
-                float s10 = starCache[row0 + cacheX + 1];
-                float s01 = starCache[row1 + cacheX];
-                float s11 = starCache[row1 + cacheX + 1];
-                float top = s00 + (s10 - s00) * fx;
-                float bot = s01 + (s11 - s01) * fx;
-                float star = top + (bot - top) * fy;          // bilinear (0..255)
+                byte* dst0 = (byte*)bd.Scan0;
+                for (int yy = 0; yy < rh; yy++)
+                {
+                    float worldY = baseY + yy * yStepW;
+                    int cacheY = (int)worldY - cacheOY;
+                    float fy;
+                    if (cacheY < 0) { cacheY = 0; fy = 0f; }
+                    else if (cacheY >= cacheHO - 1) { cacheY = cacheHO - 2; fy = 1f; }
+                    else fy = worldY - cacheOY - cacheY;
+                    int row0 = cacheY * cacheWO, row1 = row0 + cacheWO;
+                    int gy0 = (int)Math.Floor(worldY / Cell) - twOy0;
+                    if (gy0 < 0) gy0 = 0; else if (gy0 >= twH) gy0 = twH - 1;
+                    int twRow = gy0 * twWx;
 
-                // Twinkle is bound to the star's OWN cell: stars never cross a cell
-                // boundary (maxOffset + maxRadius <= 0.5 cell edge), so the pixel's cell
-                // IS the star's cell — the whole translated star breathes together.
-                int gx0 = (int)Math.Floor(worldX / Cell) - twOxx;
-                if (gx0 < 0) gx0 = 0; if (gx0 >= twW) gx0 = twW - 1;
-                float bright = twCache[gy0 * twW + gx0];      // per-cell twinkle (breathe factor applied)
+                    // Walk the row with incremental cell index (no per-pixel division).
+                    byte* dptr = dst0 + yy * stride;
+                    float wx = baseX;
+                    int cacheX = (int)wx - cacheOX;
+                    float fx;
+                    if (cacheX < 0) { cacheX = 0; fx = 0f; }
+                    else if (cacheX >= cacheWO - 1) { cacheX = cacheWO - 2; fx = 1f; }
+                    else fx = wx - cacheOX - cacheX;
+                    int gxCur = (int)Math.Floor(wx / Cell) - twOx0;
+                    float cellEdge = (gxCur + twOx0 + 1) * cellW0;
+                    if (gxCur < 0) gxCur = 0; else if (gxCur >= twWx) gxCur = twWx - 1;
 
-                float v = star * bright;
-                if (v > 255f) v = 255f;
-                byte b = (byte)v;
-                int i = yy * bd.Stride + xx * 3;
-                dst[i] = b; dst[i + 1] = b; dst[i + 2] = b;
+                    for (int xx = 0; xx < rw; xx++)
+                    {
+                        float s00 = sc[row0 + cacheX];
+                        float s10 = sc[row0 + cacheX + 1];
+                        float s01 = sc[row1 + cacheX];
+                        float s11 = sc[row1 + cacheX + 1];
+                        float top = s00 + (s10 - s00) * fx;
+                        float bot = s01 + (s11 - s01) * fx;
+                        float star = top + (bot - top) * fy;          // bilinear (0..255)
+
+                        // Twinkle is bound to the star's OWN cell: stars never cross a cell
+                        // boundary (maxOffset + maxRadius <= 0.5 cell edge), so the pixel's
+                        // cell IS the star's cell — the whole translated star breathes together.
+                        float bright = tw[twRow + gxCur];
+                        float v = star * bright;
+                        if (v > 255f) v = 255f;
+                        byte b = (byte)v;
+                        dptr[0] = b; dptr[1] = b; dptr[2] = b;
+                        dptr += 3;
+
+                        wx += xStepW;
+                        cacheX = (int)wx - cacheOX;
+                        if (cacheX < 0) { cacheX = 0; fx = 0f; }
+                        else if (cacheX >= cacheWO - 1) { cacheX = cacheWO - 2; fx = 1f; }
+                        else fx = wx - cacheOX - cacheX;
+                        if (wx >= cellEdge) { gxCur++; cellEdge += cellW0; if (gxCur >= twWx) gxCur = twWx - 1; }
+                    }
+                }
             }
         }
-        Marshal.Copy(dst, 0, bd.Scan0, dst.Length);
-        bmp.UnlockBits(bd);
-        g.DrawImage(bmp, 0, 0, Width, Height);
-        bmp.Dispose();
+        renderBmp.UnlockBits(bd);
+        g.DrawImage(renderBmp, 0, 0, Width, Height);
 
         using (var f = new Font("Consolas", 10))
         {
@@ -200,6 +241,7 @@ public class StarCanvas : Control
             g.DrawString("auto cruising (Esc=close)", f, Brushes.Orange, 752, 0);
             g.DrawString(string.Format("seed={0}  hash=0x{1:X8}  (输入13位编码点[生成底图])",
                 currentCode, (uint)p.seed), f, Brushes.LightGreen, 8, 30);
+            g.DrawString(string.Format("render {0}x{1}  fps {2:F0}", rw, rh, fpsDisplay), f, Brushes.Yellow, 8, 60);
         }
     }
 }
@@ -210,6 +252,7 @@ public class StarFieldViewerForm : Form
     StarFieldAlgo.StarField.Params p;
     StarCanvas starCanvas;
     Timer timer;
+    int lastTitleTick;
 
     // Seed input controls
     TextBox seedBox;
@@ -326,6 +369,11 @@ public class StarFieldViewerForm : Form
         timer.Tick += delegate(object s, EventArgs e2)
         {
             starCanvas.Tick(Environment.TickCount);
+            if (Environment.TickCount - lastTitleTick >= 500)
+            {
+                lastTitleTick = Environment.TickCount;
+                Text = string.Format("Star Field Viewer (fps {0:F0})", starCanvas.fpsDisplay);
+            }
         };
         timer.Start();
     }
